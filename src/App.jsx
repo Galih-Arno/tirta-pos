@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { Clock, Users, Coffee, FileText, PlusCircle, CheckCircle, X, ShoppingCart, DollarSign, Edit, Trash2, Printer, Plus, Minus, Receipt, Lock, ShieldCheck, LogOut, KeyRound, Download } from 'lucide-react';
 import dayjs from 'dayjs';
 
-// Helper Konversi Gambar ke Base64 (Untuk Cetak Offline Struk 80mm)
+// Helper Konversi Gambar ke Base64 (Untuk Cetak Struk 80mm Offline)
 const getBase64ImageFromUrl = async (imageUrl) => {
   try {
     const res = await fetch(imageUrl);
@@ -16,7 +16,7 @@ const getBase64ImageFromUrl = async (imageUrl) => {
       reader.readAsDataURL(blob);
     });
   } catch (err) {
-    console.error("Gagal memuat gambar logo struk:", err);
+    console.error("Gagal memuat logo struk:", err);
     return '';
   }
 };
@@ -108,7 +108,7 @@ function App() {
         if (await db.products.count() === 0) {
           await db.products.bulkAdd([
             { name: 'Anggur Merah', buy_price: 80000, sell_price: 100000, stock: 50, status: 'active' },
-            { name: 'Atlas', buy_price: 90000, sell_price: 110000, stock: 50, status: 'active' },
+            { name: 'Bir Bintang', buy_price: 50000, sell_price: 75000, stock: 50, status: 'active' },
             { name: 'Kacang Garing', buy_price: 10000, sell_price: 20000, stock: 100, status: 'active' }
           ]);
         }
@@ -405,11 +405,10 @@ function App() {
     setShowLcModal(false);
   };
 
-  // --- CETAK STRUK 80MM DENGAN LOGO THERMAL LINE-ART ---
+  // CETAK STRUK 80MM (DENGAN DETAIL TARIF LC Rp 85rb/jam, Rp 45rb/30m)
   const handlePrintDraftReceipt = async () => {
     if (!activeTransaction || !selectedRoom) return;
 
-    // Convert gambar logo struk ke Base64 untuk pencetakan offline presisi
     const logoBase64 = await getBase64ImageFromUrl('/logo-struk.jpg');
 
     const printWindow = window.open('', '_blank');
@@ -443,7 +442,6 @@ function App() {
           </style>
         </head>
         <body>
-          <!-- LOGO THERMAL PRESTISE -->
           <div class="text-center">
             ${logoBase64 ? `<img src="${logoBase64}" class="logo-struk" alt="Tirta Perkasa Karaoke" />` : '<div class="bold" style="font-size:16px;">TIRTA PERKASA KARAOKE</div>'}
             <div class="subtitle">Desa Purworejo, Kec. Pasir Sakti, Lampung Timur</div>
@@ -452,7 +450,6 @@ function App() {
 
           <div class="divider-double"></div>
 
-          <!-- INFO NOTA -->
           <div class="flex"><span>No. Nota:</span><span class="bold">${activeTransaction.bill_number}</span></div>
           <div class="flex"><span>Tgl/Waktu:</span><span>${dayjs().format('DD/MM/YY HH:mm')}</span></div>
           <div class="flex"><span>Tamu:</span><span class="bold">${activeTransaction.guest_name}</span></div>
@@ -485,7 +482,7 @@ function App() {
             `).join('')}
           ` : ''}
 
-          <!-- 3. LADIES COMPANION -->
+          <!-- 3. LADIES COMPANION (DISERTAI DETAIL TARIF RP 85K/JAM & 45K/30M) -->
           ${lcCalculations && lcCalculations.length > 0 ? `
             <div class="divider-single"></div>
             <div class="bold" style="margin-bottom: 2px;">3. LADIES COMPANION (LC)</div>
@@ -493,8 +490,8 @@ function App() {
               <div class="item-row">
                 <div>${l.lc_name} (${l.hours} Jam)</div>
                 <div class="flex">
-                  <span>Tarif LC</span>
-                  <span>Rp ${l.cost.toLocaleString('id-ID')}</span>
+                  <span>@ Rp 85.000/jam (45.000/30m)</span>
+                  <span class="bold">Rp ${l.cost.toLocaleString('id-ID')}</span>
                 </div>
               </div>
             `).join('')}
@@ -502,7 +499,6 @@ function App() {
 
           <div class="divider-double"></div>
 
-          <!-- TOTAL & PEMBAYARAN -->
           <div class="flex">
             <span>Subtotal</span>
             <span>Rp ${rawGrandTotal.toLocaleString('id-ID')}</span>
@@ -521,7 +517,6 @@ function App() {
           </div>
           <div class="divider-double"></div>
 
-          <!-- FOOTER -->
           <div class="text-center" style="margin-top: 8px;">
             <div class="bold">TERIMA KASIH ATAS KUNJUNGAN ANDA</div>
             <div class="subtitle" style="margin-top: 4px;">Powered by Tirta POS System</div>
@@ -686,14 +681,11 @@ function App() {
       <div className="w-[60%] p-6 flex flex-col relative z-0 border-r border-gray-800">
         <div className="flex justify-between items-center mb-6">
           <div>
-            {/* LOGO HEADER ELEGAN APLIKASI */}
             <img 
               src="/logo-header.jpg" 
               alt="Tirta Perkasa Karaoke" 
               className="h-14 w-auto object-contain rounded-lg border border-amber-500/30 shadow-md mb-2"
-              onError={(e) => {
-                e.target.style.display = 'none';
-              }}
+              onError={(e) => { e.target.style.display = 'none'; }}
             />
             <div className="flex items-center space-x-2 mt-1">
               <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center ${userRole === 'owner' ? 'bg-amber-900/60 text-amber-400 border border-amber-700' : 'bg-blue-900/60 text-blue-400 border border-blue-800'}`}>
@@ -713,7 +705,6 @@ function App() {
           </div>
 
           <div className="flex space-x-2 items-center">
-            {/* KHUSUS MODE OWNER */}
             {userRole === 'owner' && (
               <>
                 <button onClick={() => setShowChangePinModal(true)} className="p-2.5 rounded-xl border bg-amber-950/40 border-amber-800 text-amber-300 hover:bg-amber-900/60 transition-all" title="Ganti PIN Owner"><KeyRound size={18} /></button>
@@ -901,7 +892,7 @@ function App() {
                         )}
                       </div>
 
-                      {/* LC */}
+                      {/* LC (DENGAN TAMPILAN TARIF RP 85K/JAM & 45K/30M) */}
                       <div className="mb-6">
                         <div className="flex justify-between items-center mb-2">
                           <span className="font-semibold text-sm text-gray-300">Ladies Companion (LC)</span>
@@ -911,8 +902,11 @@ function App() {
                           <p className="text-xs text-gray-500 italic">Tidak ada LC bertugas</p>
                         ) : (
                           lcCalculations?.map(l => (
-                            <div key={l.id} className="flex justify-between text-xs mb-1 text-gray-300 bg-dark p-2 rounded-xl border border-gray-800">
-                              <span>- {l.lc_name} ({l.hours} Jam)</span>
+                            <div key={l.id} className="flex justify-between items-center text-xs mb-1.5 text-gray-300 bg-dark p-2 rounded-xl border border-gray-800">
+                              <div>
+                                <p className="font-bold text-white text-xs">- {l.lc_name} ({l.hours} Jam)</p>
+                                <p className="text-[10px] text-gray-400">@ Rp 85k/jam (45k/30m)</p>
+                              </div>
                               <span className="font-bold text-blue-300">Rp {l.cost.toLocaleString('id-ID')}</span>
                             </div>
                           ))
@@ -1069,7 +1063,7 @@ function App() {
         </div>
       )}
 
-      {/* MODAL HISTORY */}
+      {/* MODAL HISTORY TRANSAKSI */}
       {showHistoryModal && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-[800px] max-h-[85vh] rounded-2xl border shadow-2xl p-6 flex flex-col bg-card border-gray-700 text-white">
@@ -1149,9 +1143,12 @@ function App() {
                           <span>Rp {f.subtotal.toLocaleString('id-ID')}</span>
                         </div>
                       ))}
-                      <p className="font-bold mt-2 mb-1 text-white">Rincian LC:</p>
+                      <p className="font-bold mt-2 mb-1 text-white">Rincian LC (@ Rp 85.000/jam, 45.000/30m):</p>
                       {historyLcs?.map(l => (
-                        <div key={l.id}>- {l.lc_name}</div>
+                        <div key={l.id} className="flex justify-between">
+                          <span>- {l.lc_name}</span>
+                          <span className="text-gray-300">Rp {calculateLcCost(selectedHistoryTrx.duration_hours || 0).toLocaleString('id-ID')}</span>
+                        </div>
                       ))}
                     </div>
                   </div>
