@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { db, seedInitialData } from './db/database';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Clock, Users, Coffee, FileText, PlusCircle, CheckCircle, X, ShoppingCart, DollarSign, Edit, Trash2, Printer, Plus, Minus, Receipt, Lock, ShieldCheck, LogOut, KeyRound, Download } from 'lucide-react';
+import { Clock, Users, Coffee, FileText, PlusCircle, CheckCircle, X, ShoppingCart, DollarSign, Edit, Trash2, Printer, Plus, Minus, Receipt, Lock, ShieldCheck, LogOut, KeyRound, Download, Wallet, LogOut as EndRoomIcon } from 'lucide-react';
 import dayjs from 'dayjs';
 
 // Helper Konversi Gambar ke Base64 (Untuk Cetak Struk 80mm Offline)
@@ -48,7 +48,7 @@ function calculateLcCost(hours) {
 function App() {
   const [selectedRoom, setSelectedRoom] = useState(null);
   
-  // State Role & Pengaturan PIN Permanen (Default PIN: 1234)
+  // State Role & PIN Owner
   const [userRole, setUserRole] = useState('kasir'); // 'kasir' | 'owner'
   const [ownerPin, setOwnerPin] = useState(() => localStorage.getItem('tirta_owner_pin') || '1234');
   const [showPinModal, setShowPinModal] = useState(false);
@@ -74,13 +74,19 @@ function App() {
   const [showLcManageModal, setShowLcManageModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showLcPayoutModal, setShowLcPayoutModal] = useState(false);
   const [selectedHistoryTrx, setSelectedHistoryTrx] = useState(null);
 
-  // State Filter & Checkout
+  // State Filter, Checkout & Top-Up
   const [historyFilter, setHistoryFilter] = useState('today');
   const [discountAmount, setDiscountAmount] = useState('');
   const [reportStartDate, setReportStartDate] = useState(dayjs().startOf('month').format('YYYY-MM-DD'));
   const [reportEndDate, setReportEndDate] = useState(dayjs().format('YYYY-MM-DD'));
+
+  // State Slip Gaji LC Mingguan
+  const [selectedLcForPayout, setSelectedLcForPayout] = useState('');
+  const [payoutStartDate, setPayoutStartDate] = useState(dayjs().subtract(6, 'day').format('YYYY-MM-DD'));
+  const [payoutEndDate, setPayoutEndDate] = useState(dayjs().format('YYYY-MM-DD'));
 
   // State Form Master F&B & LC
   const [editingProduct, setEditingProduct] = useState(null);
@@ -148,6 +154,7 @@ function App() {
 
   const historyFnb = useLiveQuery(() => selectedHistoryTrx ? db.transaction_fnb.where('transaction_id').equals(selectedHistoryTrx.id).toArray() : [], [selectedHistoryTrx]);
   const historyLcs = useLiveQuery(() => selectedHistoryTrx ? db.transaction_lcs.where('transaction_id').equals(selectedHistoryTrx.id).toArray() : [], [selectedHistoryTrx]);
+  const historyPayments = useLiveQuery(() => (selectedHistoryTrx && db.transaction_payments) ? db.transaction_payments.where('transaction_id').equals(selectedHistoryTrx.id).toArray() : [], [selectedHistoryTrx]);
   const historyRoomName = rooms?.find(r => r.id === selectedHistoryTrx?.room_id)?.room_number || '-';
 
   const activeTransaction = selectedRoom?.status === 'active' 
@@ -156,12 +163,17 @@ function App() {
 
   const runningFnb = useLiveQuery(() => activeTransaction ? db.transaction_fnb.where('transaction_id').equals(activeTransaction.id).toArray() : [], [activeTransaction]);
   const runningLcs = useLiveQuery(() => activeTransaction ? db.transaction_lcs.where('transaction_id').equals(activeTransaction.id).toArray() : [], [activeTransaction]);
+  const runningPayments = useLiveQuery(() => (activeTransaction && db.transaction_payments) ? db.transaction_payments.where('transaction_id').equals(activeTransaction.id).toArray() : [], [activeTransaction]) || [];
 
-  // Perhitungan Biaya
+  // Perhitungan Biaya Realtime
   const roomRatePerHour = selectedRoom?.hourly_rate || 50000;
   let billableRoomHours = 0;
   if (activeTransaction) {
-    billableRoomHours = calculateBillableHours(activeTransaction.start_time, currentTime.toISOString());
+    if (activeTransaction.billing_type === 'fixed') {
+      billableRoomHours = activeTransaction.duration_hours || 2;
+    } else {
+      billableRoomHours = calculateBillableHours(activeTransaction.start_time, currentTime.toISOString());
+    }
   }
 
   const roomSubtotal = Math.round(billableRoomHours * roomRatePerHour);
@@ -169,17 +181,24 @@ function App() {
 
   let lcSubtotal = 0;
   const lcCalculations = runningLcs?.map(l => {
-    const hours = calculateBillableHours(l.start_time || activeTransaction?.start_time, currentTime.toISOString());
+    const hours = activeTransaction?.billing_type === 'fixed' 
+      ? (activeTransaction.duration_hours || 2)
+      : calculateBillableHours(l.start_time || activeTransaction?.start_time, currentTime.toISOString());
     const cost = calculateLcCost(hours);
     lcSubtotal += cost;
     return { ...l, hours, cost };
   }) || [];
 
   const rawGrandTotal = roomSubtotal + fnbSubtotal + lcSubtotal;
-  const discountVal = Number(discountAmount) || 0;
+  const discountVal = Number(discountAmount) || (activeTransaction?.discount || 0);
   const grandTotal = Math.max(0, rawGrandTotal - discountVal);
 
-  // Handlers PIN Owner
+  // Akumulasi Pembayaran Sebelumnya & Sisa Hak Bayar
+  const totalPaidNet = runningPayments.reduce((sum, p) => sum + (p.amount_paid - (p.change_given || 0)), 0);
+  const remainingBalanceDue = Math.max(0, grandTotal - totalPaidNet);
+  const isPaymentSettled = remainingBalanceDue === 0 && grandTotal > 0;
+
+  // Handlers Verification PIN Owner
   const handleProtectedAction = (actionName) => {
     if (userRole === 'owner') {
       executeAction(actionName);
@@ -194,6 +213,7 @@ function App() {
     if (actionName === 'lcMaster') setShowLcManageModal(true);
     if (actionName === 'fnbMaster') setShowFnbManageModal(true);
     if (actionName === 'report') setShowReportModal(true);
+    if (actionName === 'lcPayout') setShowLcPayoutModal(true);
   };
 
   const handleVerifyPin = (e) => {
@@ -224,7 +244,7 @@ function App() {
     setOldPinInput(''); setNewPinInput(''); setConfirmPinInput('');
   };
 
-  // Export Backup JSON
+  // Export Backup Database JSON
   const handleExportData = async () => {
     try {
       const data = {
@@ -234,6 +254,7 @@ function App() {
         transactions: await db.transactions.toArray(),
         transaction_fnb: await db.transaction_fnb.toArray(),
         transaction_lcs: await db.transaction_lcs.toArray(),
+        transaction_payments: db.transaction_payments ? await db.transaction_payments.toArray() : [],
         exported_at: dayjs().format('YYYY-MM-DD HH:mm:ss')
       };
       const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(data, null, 2))}`;
@@ -248,7 +269,7 @@ function App() {
     }
   };
 
-  // Operasional Kasir
+  // Operasional Kasir: Mulai Timer Ruangan
   const handleStartRoom = async () => {
     if (!guestName.trim()) return alert("Tulis nama tamu!");
     const startTime = dayjs().toISOString();
@@ -263,7 +284,8 @@ function App() {
         end_time: endTime,
         billing_type: billingType,
         duration_hours: billingType === 'fixed' ? duration : 0,
-        status: 'ongoing'
+        status: 'ongoing',
+        discount: 0
       });
 
       if (initialSelectedLcs.length > 0) {
@@ -405,7 +427,7 @@ function App() {
     setShowLcModal(false);
   };
 
-  // CETAK STRUK 80MM (DENGAN DETAIL TARIF LC Rp 85rb/jam, Rp 45rb/30m)
+  // CETAK STRUK THERMAL 80MM (DENGAN DETAIL KEMBALIAN & NOMINAL SISA)
   const handlePrintDraftReceipt = async () => {
     if (!activeTransaction || !selectedRoom) return;
 
@@ -482,7 +504,7 @@ function App() {
             `).join('')}
           ` : ''}
 
-          <!-- 3. LADIES COMPANION (DISERTAI DETAIL TARIF RP 85K/JAM & 45K/30M) -->
+          <!-- 3. LADIES COMPANION (TARIF Rp 85K/JAM & 45K/30M) -->
           ${lcCalculations && lcCalculations.length > 0 ? `
             <div class="divider-single"></div>
             <div class="bold" style="margin-bottom: 2px;">3. LADIES COMPANION (LC)</div>
@@ -512,9 +534,36 @@ function App() {
           
           <div class="divider-single"></div>
           <div class="flex bold" style="font-size: 13px;">
-            <span>TOTAL</span>
+            <span>TOTAL TAGIHAN</span>
             <span>Rp ${grandTotal.toLocaleString('id-ID')}</span>
           </div>
+          <div class="divider-double"></div>
+
+          <!-- RINCIAN RIWAYAT PEMBAYARAN & KEMBALIAN -->
+          <div class="bold" style="margin-bottom: 4px;">RIWAYAT PEMBAYARAN:</div>
+          ${runningPayments && runningPayments.length > 0 ? runningPayments.map((p, idx) => `
+            <div class="flex">
+              <span>Bayar #${idx + 1} (${p.payment_method.toUpperCase()})</span>
+              <span>Rp ${p.amount_paid.toLocaleString('id-ID')}</span>
+            </div>
+            ${p.change_given > 0 ? `<div class="flex text-right" style="font-size:10px; font-weight:bold;"><span>Kembalian #${idx+1}</span><span>Rp ${p.change_given.toLocaleString('id-ID')}</span></div>` : ''}
+          `).join('') : '<div class="flex"><span>Belum Ada Pembayaran</span><span>Rp 0</span></div>'}
+
+          <div class="divider-single"></div>
+
+          <div class="flex bold">
+            <span>Total Tunai Diterima:</span>
+            <span>Rp ${(runningPayments.reduce((s, p) => s + p.amount_paid, 0)).toLocaleString('id-ID')}</span>
+          </div>
+          <div class="flex bold text-right">
+            <span>Total Kembalian Diserahkan:</span>
+            <span>Rp ${(runningPayments.reduce((s, p) => s + (p.change_given || 0), 0)).toLocaleString('id-ID')}</span>
+          </div>
+          <div class="flex bold" style="font-size: 12px; margin-top:4px;">
+            <span>${remainingBalanceDue === 0 ? 'STATUS PEMBAYARAN' : 'SISA HAK BAYAR'}</span>
+            <span>${remainingBalanceDue === 0 ? '*** LUNAS ***' : `Rp ${remainingBalanceDue.toLocaleString('id-ID')}`}</span>
+          </div>
+
           <div class="divider-double"></div>
 
           <div class="text-center" style="margin-top: 8px;">
@@ -529,31 +578,82 @@ function App() {
     setTimeout(() => { printWindow.print(); }, 500);
   };
 
+  // PEMBAYARAN DIAWAL / BERTAHAP (PEMBAYARAN TIDAK MENGOSONGKAN ROOM)
   const handleCheckout = async () => {
-    const paid = Number(amountPaid) || 0;
-    const isKasbon = paid < grandTotal;
+    const paidInput = Number(amountPaid) || 0;
     
-    if (paymentMethod === 'cash' && isKasbon && !confirm(`Uang kurang Rp ${(grandTotal - paid).toLocaleString('id-ID')}. Simpan sebagai Kasbon/Piutang?`)) {
-      return;
+    let actualPaid = paidInput;
+    let changeGiven = 0;
+    if (paymentMethod === 'cash') {
+      if (paidInput >= remainingBalanceDue) {
+        changeGiven = paidInput - remainingBalanceDue;
+      }
+    } else {
+      actualPaid = remainingBalanceDue;
     }
 
+    const newTotalPaidNet = totalPaidNet + (actualPaid - changeGiven);
+    const isFullyPaid = newTotalPaidNet >= grandTotal;
+
     try {
+      if (db.transaction_payments) {
+        await db.transaction_payments.add({
+          transaction_id: activeTransaction.id,
+          payment_time: dayjs().toISOString(),
+          payment_method: paymentMethod,
+          amount_paid: actualPaid,
+          change_given: changeGiven,
+          note: isFullyPaid ? 'Pembayaran Lunas Diawal / Top-Up' : 'Pembayaran Bertahap / DP'
+        });
+      }
+
       await db.transactions.update(activeTransaction.id, {
-        status: isKasbon ? 'debt' : 'paid',
-        payment_method: paymentMethod,
-        amount_paid: paymentMethod === 'transfer' ? grandTotal : paid,
-        debt_amount: isKasbon ? Math.round(grandTotal - paid) : 0,
         discount: discountVal,
         duration_hours: Number(billableRoomHours.toFixed(2)),
         room_subtotal: Math.round(roomSubtotal),
         fnb_subtotal: Math.round(fnbSubtotal),
-        lc_subtotal: Math.round(lcSubtotal)
+        lc_subtotal: Math.round(lcSubtotal),
+        amount_paid: newTotalPaidNet
       });
-      await db.rooms.update(selectedRoom.id, { status: 'available' });
-      setShowCheckoutModal(false); setSelectedRoom(null); setAmountPaid(''); setDiscountAmount('');
-    } catch (e) { console.error(e); }
+
+      setShowCheckoutModal(false); 
+      setAmountPaid(''); 
+      setDiscountAmount('');
+      alert(isFullyPaid ? "Pembayaran LUNAS! Waktu sewa room tetap berjalan hingga selesai." : "Pembayaran bertahap tercatat. Sisa tagihan diperbarui.");
+    } catch (e) { 
+      console.error(e); 
+    }
   };
 
+  // KOSONGKAN RUANGAN & SELESAIKAN SESI (CHECK-OUT FINAL SAAT TAMU PULANG)
+  const handleFinishRoomSession = async () => {
+    if (!activeTransaction) return;
+
+    if (remainingBalanceDue > 0) {
+      if (!confirm(`Masih ada sisa tagihan Rp ${remainingBalanceDue.toLocaleString('id-ID')}. Selesaikan sesi & simpan sisa sebagai Kasbon?`)) {
+        return;
+      }
+    } else {
+      if (!confirm(`Konfirmasi tamu di ${selectedRoom.room_number} telah selesai dan keluar dari ruangan?`)) {
+        return;
+      }
+    }
+
+    try {
+      await db.transactions.update(activeTransaction.id, {
+        status: remainingBalanceDue > 0 ? 'debt' : 'paid',
+        debt_amount: Math.round(remainingBalanceDue)
+      });
+
+      await db.rooms.update(selectedRoom.id, { status: 'available' });
+      setSelectedRoom(null);
+      alert("Sesi ruangan selesai dan ruangan kini KOSONG.");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // CETAK LAPORAN REKAPITULASI OWNER PDF
   const handlePrintReport = async () => {
     const reportTrx = allTransactions.filter(t => {
       if (t.status === 'ongoing') return false;
@@ -643,29 +743,112 @@ function App() {
             </table>
           </div>
 
-          <div class="box">
-            <strong>DAFTAR DETAIL TRANSAKSI & KASBON PER NOTA</strong>
-            <table>
-              <thead>
-                <tr><th>No Nota</th><th>Tamu</th><th>Status</th><th>Total Tagihan</th><th>Kasbon/Kurang</th></tr>
-              </thead>
-              <tbody>
-                ${reportTrx.map(t => `
-                  <tr>
-                    <td>${t.bill_number}</td>
-                    <td>${t.guest_name}</td>
-                    <td>${t.status === 'paid' ? 'LUNAS' : 'KASBON'}</td>
-                    <td>Rp ${(((t.room_subtotal || 0) + (t.fnb_subtotal || 0) + (t.lc_subtotal || 0)) - (t.discount || 0)).toLocaleString('id-ID')}</td>
-                    <td style="color: ${t.debt_amount > 0 ? 'red' : 'inherit'};">Rp ${(t.debt_amount || 0).toLocaleString('id-ID')}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          </div>
-
           <div class="signature">
             <div><br/><br/>Kasir / Admin</div>
             <div>Purworejo, ${dayjs().format('DD MMMM YYYY')}<br/><br/>I Ketut Sunetre<br/><strong>Owner / Pengelola</strong></div>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => { printWindow.print(); }, 500);
+  };
+
+  // CETAK SLIP GAJI LC MINGGUAN HARI SABTU (80MM & PDF)
+  const handlePrintLcPayoutSlip = async () => {
+    if (!selectedLcForPayout) return alert("Pilih nama LC terlebih dahulu!");
+
+    const allLcLogs = await db.transaction_lcs.where('lc_name').equals(selectedLcForPayout).toArray();
+    const filteredLogs = [];
+    let totalLcHours = 0;
+    let totalLcEarnings = 0;
+
+    for (const log of allLcLogs) {
+      const parentTrx = await db.transactions.get(log.transaction_id);
+      if (parentTrx && parentTrx.status !== 'ongoing') {
+        const trxDate = dayjs(parentTrx.start_time);
+        if (trxDate.isAfter(dayjs(payoutStartDate).startOf('day').subtract(1, 'second')) &&
+            trxDate.isBefore(dayjs(payoutEndDate).endOf('day').add(1, 'second'))) {
+          
+          const roomObj = rooms?.find(r => r.id === parentTrx.room_id);
+          const hours = parentTrx.duration_hours || 0;
+          const cost = calculateLcCost(hours);
+
+          totalLcHours += hours;
+          totalLcEarnings += cost;
+
+          filteredLogs.push({
+            bill_number: parentTrx.bill_number,
+            date: dayjs(parentTrx.start_time).format('DD/MM/YY HH:mm'),
+            room_name: roomObj?.room_number || 'Room',
+            hours: hours,
+            cost: cost
+          });
+        }
+      }
+    }
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Slip Gaji LC - ${selectedLcForPayout}</title>
+          <style>
+            @page { size: 80mm auto; margin: 0; }
+            body { font-family: 'Courier New', Courier, monospace; width: 72mm; padding: 3mm 2mm; margin: 0 auto; color: #000; font-size: 11px; }
+            .text-center { text-align: center; }
+            .bold { font-weight: bold; }
+            .divider-double { border-bottom: 2px dashed #000; margin: 6px 0; }
+            .divider-single { border-bottom: 1px dotted #000; margin: 4px 0; }
+            .flex { display: flex; justify-content: space-between; }
+          </style>
+        </head>
+        <body>
+          <div class="text-center">
+            <div class="bold" style="font-size:14px;">TIRTA PERKASA KARAOKE</div>
+            <div style="font-size:9px;">SLIP GAJI & KOMISI LC</div>
+            <div class="bold" style="margin-top:4px;">*** SABTU PAYDAY ***</div>
+          </div>
+
+          <div class="divider-double"></div>
+
+          <div class="flex"><span>Nama LC:</span><span class="bold">${selectedLcForPayout}</span></div>
+          <div class="flex"><span>Periode:</span><span>${payoutStartDate} s/d ${payoutEndDate}</span></div>
+          <div class="flex"><span>Tgl Cetak:</span><span>${dayjs().format('DD/MM/YY HH:mm')}</span></div>
+
+          <div class="divider-double"></div>
+
+          <div class="bold" style="margin-bottom:4px;">RINCIAN JAM TERBANG:</div>
+          ${filteredLogs.length === 0 ? '<div class="text-center">Tidak ada jam terbang pada periode ini</div>' : 
+            filteredLogs.map(l => `
+              <div style="margin-bottom:3px;">
+                <div>${l.date} - ${l.room_name} (${l.hours} Jam)</div>
+                <div class="flex">
+                  <span>Nota: ${l.bill_number}</span>
+                  <span class="bold">Rp ${l.cost.toLocaleString('id-ID')}</span>
+                </div>
+              </div>
+            `).join('')
+          }
+
+          <div class="divider-single"></div>
+
+          <div class="flex bold">
+            <span>Total Jam Terbang:</span>
+            <span>${totalLcHours.toFixed(1)} Jam</span>
+          </div>
+          <div class="flex bold" style="font-size: 13px; margin-top: 4px;">
+            <span>TOTAL GAJI DITERIMA:</span>
+            <span>Rp ${totalLcEarnings.toLocaleString('id-ID')}</span>
+          </div>
+
+          <div class="divider-double"></div>
+
+          <div class="text-center" style="margin-top: 15px;">
+            <div>( _____________________ )</div>
+            <div class="bold" style="margin-top: 2px;">${selectedLcForPayout}</div>
+            <div style="font-size:9px; margin-top:10px;">Diterbitkan & Disetujui oleh Owner</div>
           </div>
         </body>
       </html>
@@ -707,6 +890,7 @@ function App() {
           <div className="flex space-x-2 items-center">
             {userRole === 'owner' && (
               <>
+                <button onClick={() => handleProtectedAction('lcPayout')} className="p-2.5 rounded-xl border bg-green-950/40 border-green-800 text-green-300 hover:bg-green-900/60 transition-all flex items-center text-xs font-bold" title="Penggajian LC Sabtu"><Wallet size={16} className="mr-1"/> Gaji LC</button>
                 <button onClick={() => setShowChangePinModal(true)} className="p-2.5 rounded-xl border bg-amber-950/40 border-amber-800 text-amber-300 hover:bg-amber-900/60 transition-all" title="Ganti PIN Owner"><KeyRound size={18} /></button>
                 <button onClick={handleExportData} className="p-2.5 rounded-xl border bg-gray-900 border-gray-700 text-gray-300 hover:bg-gray-800 transition-all" title="Backup Database (JSON)"><Download size={18} /></button>
                 <button onClick={() => handleProtectedAction('lcMaster')} className="p-2.5 rounded-xl border bg-card border-gray-700 hover:bg-gray-800 text-gray-200 transition-all" title="Kelola Master LC"><Users size={18} /></button>
@@ -748,8 +932,8 @@ function App() {
                 </div>
 
                 {trx && (
-                  <div className="mt-3 px-3 py-2 rounded-xl border font-bold text-base truncate bg-black/55 border-blue-400/60 text-blue-300 shadow-inner">
-                    👤 {trx.guest_name}
+                  <div className="mt-3 px-3 py-2 rounded-xl border font-bold text-base truncate bg-black/55 border-blue-400/60 text-blue-300 shadow-inner flex justify-between items-center">
+                    <span>👤 {trx.guest_name}</span>
                   </div>
                 )}
 
@@ -782,7 +966,7 @@ function App() {
         </div>
       </div>
 
-      {/* SISI KANAN: PANEL AKSI */}
+      {/* SISI KANAN: PANEL AKSI TRANSAKSI */}
       <div className="w-[40%] p-6 overflow-y-auto relative z-0 border-l bg-[#161616] border-gray-800">
         {selectedRoom ? (
           <div>
@@ -850,7 +1034,9 @@ function App() {
                     </div>
                   </div>
 
-                  <button onClick={handleStartRoom} className="w-full py-4 bg-success text-white font-bold rounded-xl hover:bg-green-600 shadow-lg shadow-green-600/30 transition-all">MULAI</button>
+                  <button onClick={handleStartRoom} className="w-full py-4 bg-success text-white font-bold rounded-xl hover:bg-green-600 shadow-lg shadow-green-600/30 transition-all flex items-center justify-center text-lg">
+                    <Clock size={20} className="mr-2"/> MULAI TIMER SEWA ROOM
+                  </button>
                </div>
             ) : (
                <div className="p-6 rounded-2xl border shadow-lg bg-card border-gray-800">
@@ -934,19 +1120,35 @@ function App() {
                       </div>
 
                       <button onClick={handlePrintDraftReceipt} className="w-full py-3 mb-4 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-blue-300 font-bold rounded-xl flex items-center justify-center text-sm transition-all shadow-md">
-                        <Receipt size={18} className="mr-2 text-warning" /> CETAK STRUK DIAWAL (80MM)
+                        <Receipt size={18} className="mr-2 text-warning" /> CETAK STRUK STRUK 80MM (RINCIAN KEMBALIAN)
                       </button>
 
-                      <div className="border-t pt-4 mb-6 border-gray-700">
-                        <div className="flex justify-between items-center text-xl font-bold text-white">
-                          <span>TOTAL TAGIHAN</span>
-                          <span className="text-success font-extrabold">Rp {grandTotal.toLocaleString('id-ID')}</span>
+                      <div className="border-t pt-4 mb-4 border-gray-700 space-y-1 bg-black/30 p-3 rounded-xl">
+                        <div className="flex justify-between items-center text-xs text-gray-400">
+                          <span>Total Tagihan Nota:</span>
+                          <span className="font-bold text-white">Rp {grandTotal.toLocaleString('id-ID')}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs text-gray-400">
+                          <span>Sudah Terbayar (Net):</span>
+                          <span className="font-bold text-green-400">Rp {totalPaidNet.toLocaleString('id-ID')}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-base font-bold text-white pt-1 border-t border-gray-800">
+                          <span>{isPaymentSettled ? 'STATUS PEMBAYARAN' : 'SISA WAKTU BAYAR'}</span>
+                          <span className={isPaymentSettled ? 'text-success font-extrabold' : 'text-warning font-extrabold'}>
+                            {isPaymentSettled ? 'LUNAS (TIMER RUNNING)' : `Rp ${remainingBalanceDue.toLocaleString('id-ID')}`}
+                          </span>
                         </div>
                       </div>
 
-                      <button onClick={() => setShowCheckoutModal(true)} className="w-full py-4 bg-danger hover:bg-red-600 text-white font-bold rounded-xl shadow-lg shadow-red-600/30 flex items-center justify-center text-lg transition-all">
-                        <DollarSign size={24} className="mr-2" /> PROSES PEMBAYARAN
-                      </button>
+                      <div className="space-y-2">
+                        <button onClick={() => setShowCheckoutModal(true)} className={`w-full py-3.5 font-bold rounded-xl flex items-center justify-center text-base transition-all shadow-lg ${isPaymentSettled ? 'bg-blue-800 hover:bg-blue-700 text-white' : 'bg-primary hover:bg-blue-600 text-white'}`}>
+                          <DollarSign size={20} className="mr-1.5" /> {isPaymentSettled ? 'TOP-UP / TAMBAH PEMBAYARAN' : 'PROSES BAYAR DIAWAL / DP'}
+                        </button>
+
+                        <button onClick={handleFinishRoomSession} className="w-full py-3 bg-red-950/80 hover:bg-red-900 border border-red-700 text-red-200 font-bold rounded-xl flex items-center justify-center text-sm transition-all">
+                          <EndRoomIcon size={18} className="mr-2" /> SELESAIKAN SESI & KOSONGKAN ROOM
+                        </button>
+                      </div>
                     </>
                  )}
                </div>
@@ -959,6 +1161,47 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* MODAL PENGGAJIAN LC SABTU (OWNER) */}
+      {showLcPayoutModal && (
+        <div className="absolute inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="w-[500px] rounded-2xl border shadow-2xl p-6 bg-card border-gray-700 text-white">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-serif font-bold text-green-400 flex items-center">
+                <Wallet size={20} className="mr-2"/> Penggajian LC Sabtu (Payroll)
+              </h3>
+              <button onClick={() => setShowLcPayoutModal(false)}><X className="text-gray-400 hover:text-white" /></button>
+            </div>
+            
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="block text-sm font-semibold mb-2 text-gray-300">Pilih Nama LC</label>
+                <select value={selectedLcForPayout} onChange={e => setSelectedLcForPayout(e.target.value)} className="w-full border rounded-xl p-3 outline-none font-medium bg-dark border-gray-700 text-white">
+                  <option value="">-- Pilih LC --</option>
+                  {lcs?.map(lc => (
+                    <option key={lc.id} value={lc.name}>{lc.name} ({lc.type})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold mb-1 text-gray-300">Dari Tanggal</label>
+                  <input type="date" value={payoutStartDate} onChange={e => setPayoutStartDate(e.target.value)} className="w-full border rounded-xl p-2.5 text-sm bg-dark border-gray-700 text-white outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1 text-gray-300">Sampai Tanggal</label>
+                  <input type="date" value={payoutEndDate} onChange={e => setPayoutEndDate(e.target.value)} className="w-full border rounded-xl p-2.5 text-sm bg-dark border-gray-700 text-white outline-none" />
+                </div>
+              </div>
+            </div>
+
+            <button onClick={handlePrintLcPayoutSlip} className="w-full py-4 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl shadow-lg shadow-green-600/30 flex items-center justify-center text-lg">
+              <Printer size={22} className="mr-2" /> CETAK SLIP GAJI LC (80MM / PDF)
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* MODAL PIN OWNER */}
       {showPinModal && (
@@ -1127,12 +1370,6 @@ function App() {
                           <span>- Rp {selectedHistoryTrx.discount.toLocaleString('id-ID')}</span>
                         </div>
                       )}
-                      {selectedHistoryTrx.debt_amount > 0 && (
-                        <div className="flex justify-between text-warning font-bold">
-                          <span>Kasbon / Belum Lunas</span>
-                          <span>Rp {selectedHistoryTrx.debt_amount.toLocaleString('id-ID')}</span>
-                        </div>
-                      )}
                     </div>
 
                     <div className="border-t pt-3 text-xs space-y-1 border-gray-800 text-gray-400">
@@ -1151,6 +1388,26 @@ function App() {
                         </div>
                       ))}
                     </div>
+
+                    {historyPayments && historyPayments.length > 0 && (
+                      <div className="border-t pt-3 mt-3 text-xs space-y-1 border-gray-800 text-gray-300">
+                        <p className="font-bold mb-1 text-white">Detail Riwayat & Kembalian Kasir:</p>
+                        {historyPayments.map((p, idx) => (
+                          <div key={p.id} className="bg-card p-2 rounded border border-gray-800 space-y-0.5">
+                            <div className="flex justify-between font-semibold">
+                              <span>Bayar #${idx+1} ({p.payment_method.toUpperCase()})</span>
+                              <span className="text-green-400">Diterima: Rp {p.amount_paid.toLocaleString('id-ID')}</span>
+                            </div>
+                            {p.change_given > 0 && (
+                              <div className="flex justify-between text-gray-400">
+                                <span>Kembalian Diserahkan:</span>
+                                <span>Rp {p.change_given.toLocaleString('id-ID')}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-center justify-center h-full text-gray-400 text-sm font-medium">
@@ -1334,43 +1591,52 @@ function App() {
         </div>
       )}
 
-      {/* MODAL CHECKOUT */}
+      {/* MODAL CHECKOUT & BERTAHAP / TOP-UP */}
       {showCheckoutModal && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-[500px] rounded-2xl border shadow-2xl p-6 bg-card border-gray-700 text-white">
-            <div className="flex justify-between items-center mb-6">
+            <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-serif font-bold">Pembayaran & Diskon</h3>
               <button onClick={() => setShowCheckoutModal(false)}><X className="text-gray-400 hover:text-white" /></button>
             </div>
 
-            <div className="mb-4 p-3.5 rounded-xl border bg-dark border-gray-800">
+            <div className="mb-4 p-3 rounded-xl border bg-dark border-gray-800 space-y-2">
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>Total Akumulasi Tagihan:</span>
+                <span className="font-bold text-white">Rp {grandTotal.toLocaleString('id-ID')}</span>
+              </div>
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>Sudah Terbayar Previously:</span>
+                <span className="font-bold text-green-400">Rp {totalPaidNet.toLocaleString('id-ID')}</span>
+              </div>
+              <div className="border-t pt-2 flex justify-between text-base font-bold text-white border-gray-700">
+                <span>SISA Wajib Dibayar:</span>
+                <span className="text-warning text-xl font-mono">Rp {remainingBalanceDue.toLocaleString('id-ID')}</span>
+              </div>
+            </div>
+
+            <div className="mb-4 p-3 rounded-xl border bg-dark border-gray-800">
               <label className="block text-xs font-semibold mb-1 text-gray-300">Diskon Khusus Owner (Opsional)</label>
               <input 
                 type="number" 
                 value={discountAmount} 
                 onChange={e => setDiscountAmount(e.target.value)} 
                 className="w-full border rounded-xl p-2.5 text-sm outline-none font-medium bg-card border-gray-700 text-white" 
-                placeholder="Masukkan nominal diskon (misal: 20000)" 
+                placeholder="Nominal diskon (misal: 20000)" 
               />
-              <p className="text-[10px] text-gray-500 mt-1">*Diskon ini murni mengurangi pendapatan bersih Owner, komisi LC tetap utuh.</p>
-            </div>
-
-            <div className="p-4 rounded-xl border mb-4 text-center bg-dark border-gray-800">
-              <p className="text-xs mb-1 font-semibold text-gray-400">Total Tagihan Akhir (Grand Total)</p>
-              <h1 className="text-3xl font-mono font-extrabold text-success">Rp {grandTotal.toLocaleString('id-ID')}</h1>
             </div>
 
             <div className="mb-4">
               <label className="block text-sm font-semibold mb-2 text-gray-300">Metode Pembayaran</label>
               <div className="flex space-x-2">
                 <button onClick={() => setPaymentMethod('cash')} className={`flex-1 py-3 rounded-xl font-bold text-sm border transition-all ${paymentMethod === 'cash' ? 'bg-blue-600 border-blue-500 text-white shadow-md' : 'bg-dark border-gray-700 text-gray-300'}`}>TUNAI (CASH)</button>
-                <button onClick={() => { setPaymentMethod('transfer'); setAmountPaid(grandTotal); }} className={`flex-1 py-3 rounded-xl font-bold text-sm border transition-all ${paymentMethod === 'transfer' ? 'bg-blue-600 border-blue-500 text-white shadow-md' : 'bg-dark border-gray-700 text-gray-300'}`}>TRANSFER / QRIS</button>
+                <button onClick={() => { setPaymentMethod('transfer'); setAmountPaid(remainingBalanceDue); }} className={`flex-1 py-3 rounded-xl font-bold text-sm border transition-all ${paymentMethod === 'transfer' ? 'bg-blue-600 border-blue-500 text-white shadow-md' : 'bg-dark border-gray-700 text-gray-300'}`}>TRANSFER / QRIS</button>
               </div>
             </div>
 
             {paymentMethod === 'cash' && (
               <div className="mb-4">
-                <label className="block text-sm font-semibold mb-1 text-gray-300">Uang Diterima dari Tamu</label>
+                <label className="block text-sm font-semibold mb-1 text-gray-300">Uang Diterima dari Tamu (Sesi Ini)</label>
                 <input 
                   type="number" 
                   value={amountPaid} 
@@ -1379,10 +1645,10 @@ function App() {
                   placeholder="0"
                 />
                 {amountPaid && (
-                  <div className={`mt-2 p-3.5 rounded-xl font-bold text-center text-sm border ${Number(amountPaid) >= grandTotal ? 'bg-green-900/30 border-green-800 text-success' : 'bg-warning/20 border-warning/50 text-warning'}`}>
-                    {Number(amountPaid) >= grandTotal 
-                      ? `Kembalian: Rp ${(Number(amountPaid) - grandTotal).toLocaleString('id-ID')}` 
-                      : `Uang Kurang (Kasbon): Rp ${(grandTotal - Number(amountPaid)).toLocaleString('id-ID')}`
+                  <div className={`mt-2 p-3 rounded-xl font-bold text-center text-sm border ${Number(amountPaid) >= remainingBalanceDue ? 'bg-green-900/30 border-green-800 text-success' : 'bg-warning/20 border-warning/50 text-warning'}`}>
+                    {Number(amountPaid) >= remainingBalanceDue 
+                      ? `Kembalian Sesi Ini: Rp ${(Number(amountPaid) - remainingBalanceDue).toLocaleString('id-ID')}` 
+                      : `Uang Masih Kurang (DP/Titipan): Rp ${(remainingBalanceDue - Number(amountPaid)).toLocaleString('id-ID')}`
                     }
                   </div>
                 )}
@@ -1391,13 +1657,13 @@ function App() {
 
             <div className="flex space-x-2 mb-2">
               <button onClick={handlePrintDraftReceipt} className="flex-1 py-3 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-blue-300 font-bold rounded-xl text-xs flex items-center justify-center">
-                <Receipt size={16} className="mr-1.5 text-warning" /> CETAK STRUK DIAWAL (80MM)
+                <Receipt size={16} className="mr-1.5 text-warning" /> CETAK STRUK STRUK 80MM (RINCIAN KEMBALIAN)
               </button>
             </div>
 
-            <button onClick={handleCheckout} className={`w-full py-4 text-white font-bold rounded-xl text-base flex items-center justify-center shadow-lg transition-colors ${paymentMethod === 'cash' && Number(amountPaid) < grandTotal ? 'bg-warning hover:bg-yellow-600 text-black shadow-warning/30' : 'bg-primary hover:bg-blue-600 shadow-blue-500/30'}`}>
+            <button onClick={handleCheckout} className="w-full py-4 bg-primary hover:bg-blue-600 text-white font-bold rounded-xl text-base flex items-center justify-center shadow-lg shadow-blue-500/30 transition-colors">
               <CheckCircle size={20} className="mr-2" />
-              {paymentMethod === 'cash' && amountPaid && Number(amountPaid) < grandTotal ? 'SIMPAN SEBAGAI KASBON' : 'BAYAR LUNAS & CETAK'}
+              {Number(amountPaid) >= remainingBalanceDue ? 'KONFIRMASI LUNAS DIAWAL (ROOM TETAP RUNNING)' : 'SIMPAN PEMBAYARAN BERTAHAP / DP'}
             </button>
           </div>
         </div>
