@@ -1,8 +1,25 @@
 import { useEffect, useState } from 'react';
 import { db, seedInitialData } from './db/database';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Clock, Users, Coffee, FileText, PlusCircle, CheckCircle, X, ShoppingCart, DollarSign, Edit, Trash2, Printer, Plus, Minus, Receipt, Lock, ShieldCheck, LogOut, KeyRound, Download, Upload } from 'lucide-react';
+import { Clock, Users, Coffee, FileText, PlusCircle, CheckCircle, X, ShoppingCart, DollarSign, Edit, Trash2, Printer, Plus, Minus, Receipt, Lock, ShieldCheck, LogOut, KeyRound, Download } from 'lucide-react';
 import dayjs from 'dayjs';
+
+// Helper Konversi Gambar ke Base64 (Untuk Cetak Offline Struk 80mm)
+const getBase64ImageFromUrl = async (imageUrl) => {
+  try {
+    const res = await fetch(imageUrl);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (err) {
+    console.error("Gagal memuat gambar logo struk:", err);
+    return '';
+  }
+};
 
 // Rumus Pembulatan Menit ke Blok 30 Menit (Toleransi 15 Menit)
 function calculateBillableHours(startIso, endIso = null) {
@@ -20,7 +37,7 @@ function calculateBillableHours(startIso, endIso = null) {
   return Math.max(0.5, finalBlocks * 0.5);
 }
 
-// Rumus Biaya LC Khusus (1 Jam = 85.000, 0.5 Jam = 45.000)
+// Rumus Biaya LC (1 Jam = 85.000, 0.5 Jam = 45.000)
 function calculateLcCost(hours) {
   if (hours <= 0) return 0;
   const fullHours = Math.floor(hours);
@@ -140,9 +157,8 @@ function App() {
   const runningFnb = useLiveQuery(() => activeTransaction ? db.transaction_fnb.where('transaction_id').equals(activeTransaction.id).toArray() : [], [activeTransaction]);
   const runningLcs = useLiveQuery(() => activeTransaction ? db.transaction_lcs.where('transaction_id').equals(activeTransaction.id).toArray() : [], [activeTransaction]);
 
-  // --- LOGIKA PERHITUNGAN BIAYA & TARIF LC (85rb / 45rb) ---
+  // Perhitungan Biaya
   const roomRatePerHour = selectedRoom?.hourly_rate || 50000;
-
   let billableRoomHours = 0;
   if (activeTransaction) {
     billableRoomHours = calculateBillableHours(activeTransaction.start_time, currentTime.toISOString());
@@ -163,7 +179,7 @@ function App() {
   const discountVal = Number(discountAmount) || 0;
   const grandTotal = Math.max(0, rawGrandTotal - discountVal);
 
-  // --- HANDLER VERIFIKASI & UBAH PIN OWNER ---
+  // Handlers PIN Owner
   const handleProtectedAction = (actionName) => {
     if (userRole === 'owner') {
       executeAction(actionName);
@@ -197,15 +213,9 @@ function App() {
 
   const handleChangePin = (e) => {
     e.preventDefault();
-    if (oldPinInput !== ownerPin) {
-      return alert("PIN Lama Anda salah!");
-    }
-    if (newPinInput.length < 4) {
-      return alert("PIN Baru minimal 4 digit!");
-    }
-    if (newPinInput !== confirmPinInput) {
-      return alert("Konfirmasi PIN Baru tidak cocok!");
-    }
+    if (oldPinInput !== ownerPin) return alert("PIN Lama Anda salah!");
+    if (newPinInput.length < 4) return alert("PIN Baru minimal 4 digit!");
+    if (newPinInput !== confirmPinInput) return alert("Konfirmasi PIN Baru tidak cocok!");
 
     setOwnerPin(newPinInput);
     localStorage.setItem('tirta_owner_pin', newPinInput);
@@ -214,7 +224,7 @@ function App() {
     setOldPinInput(''); setNewPinInput(''); setConfirmPinInput('');
   };
 
-  // --- FITUR BACKUP & RESTORE DATA (OWNER EXCLUSIVE) ---
+  // Export Backup JSON
   const handleExportData = async () => {
     try {
       const data = {
@@ -238,7 +248,7 @@ function App() {
     }
   };
 
-  // --- HANDLER OPERASIONAL KASIR ---
+  // Operasional Kasir
   const handleStartRoom = async () => {
     if (!guestName.trim()) return alert("Tulis nama tamu!");
     const startTime = dayjs().toISOString();
@@ -285,19 +295,15 @@ function App() {
 
       await db.rooms.update(selectedRoom.id, { status: 'active' });
       setGuestName(''); setDuration(2); setInitialSelectedLcs([]); setInitialFnbCart({}); setSelectedRoom(null);
-    } catch (e) { console.error("Error Check-in:", e); }
+    } catch (e) { console.error(e); }
   };
 
   const handleAddHourFixed = async () => {
     if (!activeTransaction || activeTransaction.billing_type !== 'fixed') return;
     const newDuration = activeTransaction.duration_hours + 1;
     const newEndTime = dayjs(activeTransaction.end_time).add(1, 'hour').toISOString();
-
     try {
-      await db.transactions.update(activeTransaction.id, {
-        duration_hours: newDuration,
-        end_time: newEndTime
-      });
+      await db.transactions.update(activeTransaction.id, { duration_hours: newDuration, end_time: newEndTime });
     } catch (e) { console.error(e); }
   };
 
@@ -305,18 +311,13 @@ function App() {
     const newQty = fnbItem.qty + delta;
     const prod = products.find(p => p.id === fnbItem.product_id);
 
-    if (delta > 0 && prod && prod.stock < 1) {
-      return alert("Stok produk tidak mencukupi!");
-    }
+    if (delta > 0 && prod && prod.stock < 1) return alert("Stok produk tidak mencukupi!");
 
     if (newQty <= 0) {
       await db.transaction_fnb.delete(fnbItem.id);
       if (prod) await db.products.update(prod.id, { stock: prod.stock + 1 });
     } else {
-      await db.transaction_fnb.update(fnbItem.id, {
-        qty: newQty,
-        subtotal: newQty * fnbItem.price_at_transaction
-      });
+      await db.transaction_fnb.update(fnbItem.id, { qty: newQty, subtotal: newQty * fnbItem.price_at_transaction });
       if (prod) await db.products.update(prod.id, { stock: prod.stock - delta });
     }
   };
@@ -396,12 +397,7 @@ function App() {
       if (!existingLcMap.has(lcId)) {
         const lc = lcs.find(l => l.id === lcId);
         if (lc) {
-          lcsToAdd.push({
-            transaction_id: activeTransaction.id,
-            lc_id: lc.id,
-            lc_name: lc.name,
-            start_time: nowIso
-          });
+          lcsToAdd.push({ transaction_id: activeTransaction.id, lc_id: lc.id, lc_name: lc.name, start_time: nowIso });
         }
       }
     }
@@ -409,95 +405,126 @@ function App() {
     setShowLcModal(false);
   };
 
-  // --- CETAK STRUK 80MM (DRAFT & LUNAS) ---
+  // --- CETAK STRUK 80MM DENGAN LOGO THERMAL LINE-ART ---
   const handlePrintDraftReceipt = async () => {
     if (!activeTransaction || !selectedRoom) return;
+
+    // Convert gambar logo struk ke Base64 untuk pencetakan offline presisi
+    const logoBase64 = await getBase64ImageFromUrl('/logo-struk.jpg');
 
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
       <html>
         <head>
-          <title>Struk Sementara - ${activeTransaction.bill_number}</title>
+          <title>Struk - ${activeTransaction.bill_number}</title>
           <style>
             @page { size: 80mm auto; margin: 0; }
+            * { box-sizing: border-box; }
             body { 
               font-family: 'Courier New', Courier, monospace; 
               width: 72mm; 
-              padding: 4mm; 
+              padding: 3mm 2mm; 
               margin: 0 auto; 
               color: #000; 
               font-size: 11px;
-              line-height: 1.3;
+              line-height: 1.25;
+              background: #fff;
             }
             .text-center { text-align: center; }
             .text-right { text-align: right; }
             .bold { font-weight: bold; }
-            .line { border-bottom: 1px dashed #000; margin: 6px 0; }
+            .logo-struk { width: 100%; max-width: 240px; height: auto; margin: 0 auto 6px auto; display: block; filter: grayscale(100%); }
+            .divider-double { border-bottom: 2px dashed #000; margin: 6px 0; }
+            .divider-single { border-bottom: 1px dotted #000; margin: 4px 0; }
             .flex { display: flex; justify-content: space-between; }
-            .title { font-size: 15px; font-weight: bold; margin-bottom: 2px; }
-            .subtitle { font-size: 10px; margin-bottom: 6px; }
+            .subtitle { font-size: 9px; margin-top: 2px; }
+            .item-row { margin-bottom: 3px; }
+            .badge { display: inline-block; padding: 1px 4px; border: 1px solid #000; font-size: 9px; font-weight: bold; }
           </style>
         </head>
         <body>
+          <!-- LOGO THERMAL PRESTISE -->
           <div class="text-center">
-            <div class="title">TIRTA PERKASA KARAOKE</div>
+            ${logoBase64 ? `<img src="${logoBase64}" class="logo-struk" alt="Tirta Perkasa Karaoke" />` : '<div class="bold" style="font-size:16px;">TIRTA PERKASA KARAOKE</div>'}
             <div class="subtitle">Desa Purworejo, Kec. Pasir Sakti, Lampung Timur</div>
-            <div class="bold">*** STRUK SEMENTARA / DRAFT ***</div>
+            <div class="bold" style="margin-top:4px;">*** STRUK TRANSAKSI ***</div>
           </div>
-          <div class="line"></div>
-          <div>No Nota : ${activeTransaction.bill_number}</div>
-          <div>Tanggal : ${dayjs().format('DD/MM/YYYY HH:mm')}</div>
-          <div>Tamu    : ${activeTransaction.guest_name}</div>
-          <div>Ruangan : ${selectedRoom.room_number} (${activeTransaction.billing_type.toUpperCase()})</div>
-          <div class="line"></div>
-          
-          <div class="bold" style="margin-bottom: 3px;">1. SEWA RUANGAN</div>
+
+          <div class="divider-double"></div>
+
+          <!-- INFO NOTA -->
+          <div class="flex"><span>No. Nota:</span><span class="bold">${activeTransaction.bill_number}</span></div>
+          <div class="flex"><span>Tgl/Waktu:</span><span>${dayjs().format('DD/MM/YY HH:mm')}</span></div>
+          <div class="flex"><span>Tamu:</span><span class="bold">${activeTransaction.guest_name}</span></div>
+          <div class="flex"><span>Ruangan:</span><span>${selectedRoom.room_number} <span class="badge">${activeTransaction.billing_type.toUpperCase()}</span></span></div>
+
+          <div class="divider-double"></div>
+
+          <!-- 1. SEWA RUANGAN -->
+          <div class="bold" style="margin-bottom: 2px;">1. SEWA RUANGAN</div>
+          <div class="item-row">
+            <div>${selectedRoom.room_number} (${billableRoomHours} Jam)</div>
+            <div class="flex">
+              <span>@ Rp ${(selectedRoom.hourly_rate || 0).toLocaleString('id-ID')}</span>
+              <span class="bold">Rp ${roomSubtotal.toLocaleString('id-ID')}</span>
+            </div>
+          </div>
+
+          <!-- 2. PESANAN F&B -->
+          ${runningFnb && runningFnb.length > 0 ? `
+            <div class="divider-single"></div>
+            <div class="bold" style="margin-bottom: 2px;">2. F&B / MINUMAN</div>
+            ${runningFnb.map(f => `
+              <div class="item-row">
+                <div>${f.product_name}</div>
+                <div class="flex">
+                  <span>${f.qty} x Rp ${f.price_at_transaction.toLocaleString('id-ID')}</span>
+                  <span>Rp ${f.subtotal.toLocaleString('id-ID')}</span>
+                </div>
+              </div>
+            `).join('')}
+          ` : ''}
+
+          <!-- 3. LADIES COMPANION -->
+          ${lcCalculations && lcCalculations.length > 0 ? `
+            <div class="divider-single"></div>
+            <div class="bold" style="margin-bottom: 2px;">3. LADIES COMPANION (LC)</div>
+            ${lcCalculations.map(l => `
+              <div class="item-row">
+                <div>${l.lc_name} (${l.hours} Jam)</div>
+                <div class="flex">
+                  <span>Tarif LC</span>
+                  <span>Rp ${l.cost.toLocaleString('id-ID')}</span>
+                </div>
+              </div>
+            `).join('')}
+          ` : ''}
+
+          <div class="divider-double"></div>
+
+          <!-- TOTAL & PEMBAYARAN -->
           <div class="flex">
-            <span>${selectedRoom.room_number} (${billableRoomHours} Jam @ Rp ${(selectedRoom.hourly_rate || 0).toLocaleString('id-ID')})</span>
+            <span>Subtotal</span>
+            <span>Rp ${rawGrandTotal.toLocaleString('id-ID')}</span>
           </div>
-          <div class="text-right bold">Rp ${roomSubtotal.toLocaleString('id-ID')}</div>
-
-          <div class="line"></div>
-          <div class="bold" style="margin-bottom: 3px;">2. PESANAN F&B</div>
-          ${runningFnb && runningFnb.length > 0 ? runningFnb.map(f => `
-            <div>${f.product_name}</div>
-            <div class="flex">
-              <span>${f.qty} x Rp ${f.price_at_transaction.toLocaleString('id-ID')}</span>
-              <span>Rp ${f.subtotal.toLocaleString('id-ID')}</span>
-            </div>
-          `).join('') : '<div style="font-style:italic;">Tidak ada pesanan F&B</div>'}
-          <div class="text-right bold" style="margin-top:2px;">Subtotal F&B: Rp ${fnbSubtotal.toLocaleString('id-ID')}</div>
-
-          <div class="line"></div>
-          <div class="bold" style="margin-bottom: 3px;">3. LADIES COMPANION (LC)</div>
-          ${lcCalculations && lcCalculations.length > 0 ? lcCalculations.map(l => `
-            <div>${l.lc_name}</div>
-            <div class="flex">
-              <span>${l.hours} Jam (Rp 85k/jam, 45k/30m)</span>
-              <span>Rp ${l.cost.toLocaleString('id-ID')}</span>
-            </div>
-          `).join('') : '<div style="font-style:italic;">Tidak ada LC</div>'}
-          <div class="text-right bold" style="margin-top:2px;">Subtotal LC: Rp ${lcSubtotal.toLocaleString('id-ID')}</div>
-
-          <div class="line"></div>
           ${discountVal > 0 ? `
-            <div class="flex">
-              <span>Subtotal</span>
-              <span>Rp ${rawGrandTotal.toLocaleString('id-ID')}</span>
-            </div>
             <div class="flex">
               <span>Diskon Owner</span>
               <span>- Rp ${discountVal.toLocaleString('id-ID')}</span>
             </div>
           ` : ''}
-          <div class="flex bold" style="font-size: 13px; margin-top: 4px;">
-            <span>TOTAL ESTIMASI</span>
+          
+          <div class="divider-single"></div>
+          <div class="flex bold" style="font-size: 13px;">
+            <span>TOTAL</span>
             <span>Rp ${grandTotal.toLocaleString('id-ID')}</span>
           </div>
-          <div class="line"></div>
-          <div class="text-center" style="font-size: 9px; margin-top: 8px;">
-            * Struk ini rincian sementara sebelum pelunasan kasir.<br/>
-            Terima kasih atas kunjungan Anda!
+          <div class="divider-double"></div>
+
+          <!-- FOOTER -->
+          <div class="text-center" style="margin-top: 8px;">
+            <div class="bold">TERIMA KASIH ATAS KUNJUNGAN ANDA</div>
+            <div class="subtitle" style="margin-top: 4px;">Powered by Tirta POS System</div>
           </div>
         </body>
       </html>
@@ -659,11 +686,17 @@ function App() {
       <div className="w-[60%] p-6 flex flex-col relative z-0 border-r border-gray-800">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-4xl tracking-wider font-extrabold vt323-font" style={{ fontFamily: "'VT323', monospace", letterSpacing: '2px' }}>
-              TIRTA PERKASA
-            </h1>
+            {/* LOGO HEADER ELEGAN APLIKASI */}
+            <img 
+              src="/logo-header.jpg" 
+              alt="Tirta Perkasa Karaoke" 
+              className="h-14 w-auto object-contain rounded-lg border border-amber-500/30 shadow-md mb-2"
+              onError={(e) => {
+                e.target.style.display = 'none';
+              }}
+            />
             <div className="flex items-center space-x-2 mt-1">
-              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full flex items-center ${userRole === 'owner' ? 'bg-amber-900/60 text-amber-400 border border-amber-700' : 'bg-blue-900/60 text-blue-400 border border-blue-800'}`}>
+              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center ${userRole === 'owner' ? 'bg-amber-900/60 text-amber-400 border border-amber-700' : 'bg-blue-900/60 text-blue-400 border border-blue-800'}`}>
                 {userRole === 'owner' ? <ShieldCheck size={12} className="mr-1"/> : <Lock size={12} className="mr-1"/>}
                 MODE: {userRole.toUpperCase()}
               </span>
@@ -680,7 +713,7 @@ function App() {
           </div>
 
           <div className="flex space-x-2 items-center">
-            {/* FITUR KHUSUS MODE OWNER (SEMBUNYI SAAT MODE KASIR) */}
+            {/* KHUSUS MODE OWNER */}
             {userRole === 'owner' && (
               <>
                 <button onClick={() => setShowChangePinModal(true)} className="p-2.5 rounded-xl border bg-amber-950/40 border-amber-800 text-amber-300 hover:bg-amber-900/60 transition-all" title="Ganti PIN Owner"><KeyRound size={18} /></button>
@@ -690,7 +723,6 @@ function App() {
               </>
             )}
 
-            {/* FITUR YANG BISA DIAKSES KASIR & OWNER */}
             <button onClick={() => setShowHistoryModal(true)} className="p-2.5 rounded-xl border bg-card border-gray-700 hover:bg-gray-800 text-gray-200 transition-all" title="Riwayat Transaksi"><FileText size={18} /></button>
 
             {userRole === 'owner' && (
@@ -789,7 +821,7 @@ function App() {
                     </div>
                   )}
 
-                  {/* Input LC Awal */}
+                  {/* LC Awal */}
                   <div>
                     <label className="block text-xs font-semibold mb-1 text-gray-300">Pilih LC Awal (Opsional)</label>
                     <div className="grid grid-cols-2 gap-2 max-h-28 overflow-y-auto p-2 bg-dark rounded-xl border border-gray-800">
@@ -807,7 +839,7 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Input F&B Awal */}
+                  {/* F&B Awal */}
                   <div>
                     <label className="block text-xs font-semibold mb-1 text-gray-300">Pilih F&B Awal (Opsional)</label>
                     <div className="space-y-1.5 max-h-32 overflow-y-auto p-2 bg-dark rounded-xl border border-gray-800">
@@ -843,7 +875,7 @@ function App() {
                         </p>
                       </div>
                       
-                      {/* Pesanan F&B Live (+ / -) */}
+                      {/* Pesanan F&B */}
                       <div className="mb-4">
                         <div className="flex justify-between items-center mb-2">
                           <span className="font-semibold text-sm text-gray-300">Pesanan F&B</span>
@@ -869,7 +901,7 @@ function App() {
                         )}
                       </div>
 
-                      {/* LC Live Tarif Baru (85rb/1 jam, 45rb/30m) */}
+                      {/* LC */}
                       <div className="mb-6">
                         <div className="flex justify-between items-center mb-2">
                           <span className="font-semibold text-sm text-gray-300">Ladies Companion (LC)</span>
@@ -907,9 +939,8 @@ function App() {
                         </button>
                       </div>
 
-                      {/* Tombol Cetak Struk Diawal (Draft 80mm) */}
                       <button onClick={handlePrintDraftReceipt} className="w-full py-3 mb-4 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-blue-300 font-bold rounded-xl flex items-center justify-center text-sm transition-all shadow-md">
-                        <Receipt size={18} className="mr-2 text-warning" /> CETAK STRUK DIAWAL (DRAFT 80MM)
+                        <Receipt size={18} className="mr-2 text-warning" /> CETAK STRUK DIAWAL (80MM)
                       </button>
 
                       <div className="border-t pt-4 mb-6 border-gray-700">
@@ -935,7 +966,7 @@ function App() {
         )}
       </div>
 
-      {/* --- MODAL INPUT PIN OWNER --- */}
+      {/* MODAL PIN OWNER */}
       {showPinModal && (
         <div className="absolute inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-80 rounded-2xl border shadow-2xl p-6 bg-card border-gray-700 text-white">
@@ -964,7 +995,7 @@ function App() {
         </div>
       )}
 
-      {/* --- MODAL GANTI PIN OWNER --- */}
+      {/* MODAL GANTI PIN OWNER */}
       {showChangePinModal && (
         <div className="absolute inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-96 rounded-2xl border shadow-2xl p-6 bg-card border-gray-700 text-white">
@@ -1013,7 +1044,7 @@ function App() {
         </div>
       )}
 
-      {/* --- MODAL LAPORAN PDF OWNER --- */}
+      {/* MODAL LAPORAN OWNER */}
       {showReportModal && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-[500px] rounded-2xl border shadow-2xl p-6 bg-card border-gray-700 text-white">
@@ -1038,7 +1069,7 @@ function App() {
         </div>
       )}
 
-      {/* --- MODAL RIWAYAT TRANSAKSI (HISTORY) --- */}
+      {/* MODAL HISTORY */}
       {showHistoryModal && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-[800px] max-h-[85vh] rounded-2xl border shadow-2xl p-6 flex flex-col bg-card border-gray-700 text-white">
@@ -1142,7 +1173,7 @@ function App() {
         </div>
       )}
 
-      {/* --- MODAL KELOLA MASTER LC (PROTEKSI OWNER) --- */}
+      {/* MASTER LC */}
       {showLcManageModal && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-[550px] max-h-[85vh] rounded-2xl border shadow-2xl p-6 flex flex-col bg-card border-gray-700 text-white">
@@ -1191,7 +1222,7 @@ function App() {
         </div>
       )}
 
-      {/* --- MODAL KELOLA MASTER F&B & STOK OPNAME (PROTEKSI OWNER) --- */}
+      {/* MASTER F&B */}
       {showFnbManageModal && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-[650px] max-h-[85vh] rounded-2xl border shadow-2xl p-6 flex flex-col bg-card border-gray-700 text-white">
@@ -1243,7 +1274,7 @@ function App() {
         </div>
       )}
 
-      {/* --- MODAL TAMBAH F&B KE TRANSAKSI --- */}
+      {/* MODAL TAMBAH F&B TRANSAKSI */}
       {showFnbModal && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-96 rounded-2xl border shadow-2xl p-6 bg-card border-gray-700 text-white">
@@ -1274,7 +1305,7 @@ function App() {
         </div>
       )}
 
-      {/* --- MODAL ATUR LC --- */}
+      {/* MODAL PILIH LC */}
       {showLcModal && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-96 rounded-2xl border shadow-2xl p-6 bg-card border-gray-700 text-white">
@@ -1306,7 +1337,7 @@ function App() {
         </div>
       )}
 
-      {/* --- MODAL CHECKOUT & PEMBAYARAN --- */}
+      {/* MODAL CHECKOUT */}
       {showCheckoutModal && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="w-[500px] rounded-2xl border shadow-2xl p-6 bg-card border-gray-700 text-white">
