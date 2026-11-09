@@ -24,8 +24,11 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Gradle Cache & Tooling
-        uses: gradle/actions/setup-gradle@v4
+      - name: Download Gradle Binary with Auto-Retry
+        run: |
+          mkdir -p android/gradle/wrapper
+          curl --retry 5 --retry-delay 5 -sSL -o android/gradle/wrapper/gradle-8.11.1-bin.zip https://services.gradle.org/distributions/gradle-8.11.1-bin.zip
+          sed -i 's|distributionUrl=.*|distributionUrl=gradle-8.11.1-bin.zip|g' android/gradle/wrapper/gradle-wrapper.properties
 
       - name: Install Dependencies
         run: npm install
