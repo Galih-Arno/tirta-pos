@@ -34,7 +34,7 @@ import MasterFnbModal from './modals/master/MasterFnbModal';
 import MasterLcModal from './modals/master/MasterLcModal';
 import LicenseModal from './modals/LicenseModal';
 
-const CURRENT_APP_VERSION = '1.6.0';
+const CURRENT_APP_VERSION = '1.0.0';
 
 function App() {
   // State Aktivasi Lisensi Perangkat

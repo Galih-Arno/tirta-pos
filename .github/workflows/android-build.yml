@@ -45,25 +45,29 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      # Simpan Artefak sebagai cadangan di tab Actions
+      # Ubah Nama File APK Menjadi TirtaPerkasa.apk
+      - name: Rename APK File
+        run: |
+          mkdir -p build-output
+          cp android/app/build/outputs/apk/debug/app-debug.apk build-output/TirtaPerkasa.apk
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Tirta-Pos-Offline
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: build-output/TirtaPerkasa.apk
 
-      # Buat GitHub Release Otomatis HANYA saat Push Tag (misal: v1.2.0)
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: build-output/TirtaPerkasa.apk
           name: Release ${{ github.ref_name }}
           body: |
-            ### 🚀 Pembaruan Aplikasi Tirta POS (${{ github.ref_name }})
+            ### 🚀 Pembaruan Aplikasi Tirta Perkasa POS (${{ github.ref_name }})
             
-            - Berkas APK siap digunakan dan mendukung fitur **In-App Auto Update**.
-            - Silakan unduh `app-debug.apk` di bawah ini untuk memperbarui aplikasi di tablet/HP kasir.
+            - Berkas **TirtaPerkasa.apk** siap diunduh dan mendukung fitur **In-App Auto Update**.
+            - Silakan unduh file di bawah ini untuk memperbarui sistem kasir.
           draft: false
           prerelease: false
         env:
