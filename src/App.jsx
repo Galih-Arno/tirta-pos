@@ -34,7 +34,7 @@ import MasterFnbModal from './modals/master/MasterFnbModal';
 import MasterLcModal from './modals/master/MasterLcModal';
 import LicenseModal from './modals/LicenseModal';
 
-const CURRENT_APP_VERSION = '1.4.0'; // Diubah sementara dari 1.2.0\
+const CURRENT_APP_VERSION = '1.5.0';
 
 function App() {
   // State Aktivasi Lisensi Perangkat
@@ -143,16 +143,38 @@ function App() {
         await seedInitialData();
         if (await db.products.count() === 0) {
           await db.products.bulkAdd([
-            { name: 'Anggur Merah', buy_price: 80000, sell_price: 100000, stock: 50, status: 'active' },
-            { name: 'Bir Bintang', buy_price: 50000, sell_price: 75000, stock: 50, status: 'active' },
-            { name: 'Kacang Garing', buy_price: 10000, sell_price: 20000, stock: 100, status: 'active' }
+            { name: 'Anggur Merah', buy_price: 0, sell_price: 115000, stock: 0, status: 'active' },
+            { name: 'Pigurr', buy_price: 0, sell_price: 100000, stock: 0, status: 'active' },
+            { name: 'Atlas', buy_price: 0, sell_price: 140000, stock: 0, status: 'active' },
+            { name: 'Kawa-Kawa', buy_price: 0, sell_price: 140000, stock: 0, status: 'active' },
+            { name: 'Soju', buy_price: 0, sell_price: 140000, stock: 0, status: 'active' },
+            { name: 'Bir Lemon', buy_price: 0, sell_price: 50000, stock: 0, status: 'active' },
+            { name: 'Bir Putih', buy_price: 0, sell_price: 70000, stock: 0, status: 'active' },
+            { name: 'Bir Hitam', buy_price: 0, sell_price: 80000, stock: 0, status: 'active' },
+            { name: 'Bir Anggur', buy_price: 0, sell_price: 90000, stock: 0, status: 'active' },
+            { name: 'M150', buy_price: 0, sell_price: 10000, stock: 0, status: 'active' },
+            { name: 'Bintang Zero', buy_price: 0, sell_price: 20000, stock: 0, status: 'active' },
+            { name: 'Aqua', buy_price: 0, sell_price: 10000, stock: 0, status: 'active' },
+            { name: 'Susu Beruang', buy_price: 0, sell_price: 20000, stock: 0, status: 'active' },
+            { name: 'Tisu', buy_price: 0, sell_price: 20000, stock: 0, status: 'active' },
+            { name: 'Sampoerna Mild', buy_price: 0, sell_price: 50000, stock: 0, status: 'active' },
+            { name: 'Esse Double', buy_price: 0, sell_price: 60000, stock: 0, status: 'active' },
+            { name: 'Esse Change Biru', buy_price: 0, sell_price: 60000, stock: 0, status: 'active' },
+            { name: 'Esse Juice', buy_price: 0, sell_price: 60000, stock: 0, status: 'active' },
+            { name: 'LA Ice', buy_price: 0, sell_price: 50000, stock: 0, status: 'active' },
+            { name: 'Class Mild', buy_price: 0, sell_price: 45000, stock: 0, status: 'active' },
+            { name: 'Surya 16', buy_price: 0, sell_price: 50000, stock: 0, status: 'active' },
+            { name: 'Dunhill', buy_price: 0, sell_price: 50000, stock: 0, status: 'active' },
+            { name: 'Bull', buy_price: 0, sell_price: 45000, stock: 0, status: 'active' }
           ]);
         }
         if (await db.lcs.count() === 0) {
           await db.lcs.bulkAdd([
-            { name: 'Siska', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
+            { name: 'AnjeLL', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
+            { name: 'Givia', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
+            { name: 'Lita', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
             { name: 'Putri', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
-            { name: 'Rina (Freelance)', type: 'freelance', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' }
+            { name: 'Sisil', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' }
           ]);
         }
       } catch (err) {
@@ -163,7 +185,9 @@ function App() {
 
     const checkAppUpdate = async () => {
       try {
-        const res = await fetch('https://api.github.com/repos/Galih-Arno/tirta-pos/releases/latest');
+        const res = await fetch('https://api.github.com/repos/Galih-Arno/tirta-pos/releases/latest', {
+          headers: { 'Accept': 'application/vnd.github.v3+json' }
+        });
         if (res.ok) {
           const data = await res.json();
           const latestTag = data.tag_name?.replace('v', '') || '';
@@ -235,7 +259,6 @@ function App() {
       ? (activeTransaction.duration_hours || 2)
       : calculateBillableHours(l.start_time || activeTransaction?.start_time, currentTime.toISOString());
     
-    // Pembacaan tarif dinamis per LC dari DB
     const masterLc = lcs?.find(m => m.id === l.lc_id || m.name === l.lc_name);
     const gRate = masterLc?.hourly_rate_guest || 85000;
     const lRate = masterLc?.hourly_rate_lc || 75000;
@@ -639,7 +662,6 @@ function App() {
     setEditingProduct(null); setProdName(''); setProdBuyPrice(''); setProdSellPrice(''); setProdStock('');
   };
 
-  // Handler Simpan Master LC dengan Menyimpan Tarif Kotor Tamu & Hak Bersih LC
   const handleSaveLcMaster = async (e) => {
     e.preventDefault();
     if (!lcName.trim()) return alert("Nama LC wajib diisi!");
@@ -747,13 +769,30 @@ function App() {
     }
   };
 
-  // CHECKPOINTS AKTIVASI LISENSI: Jika Perangkat Belum Terdaftar/Terverifikasi, Kunci Akses POS
+  // CHECKPOINTS AKTIVASI LISENSI
   if (!isActivated) {
     return <LicenseModal setIsActivated={setIsActivated} />;
   }
 
   return (
-    <div className="flex h-screen font-sans overflow-hidden bg-[#0d0f12] text-white">
+    <div className="flex h-screen font-sans overflow-hidden bg-[#0d0f12] text-white relative">
+      {/* Update Banner Dipasang Melayang di Paling Atas (z-50) */}
+      {updateAvailable && (
+        <div className="fixed top-0 left-0 right-0 z-50 p-3 bg-amber-500 text-black font-bold flex justify-between items-center shadow-2xl border-b-2 border-black">
+          <div className="text-xs">
+            🚀 <strong>Pembaruan Tersedia (v{latestVersion})!</strong> Silakan unduh versi terbaru untuk fitur & perbaikan bug.
+          </div>
+          <a 
+            href={downloadUrl} 
+            target="_blank" 
+            rel="noreferrer" 
+            className="px-3 py-1.5 bg-black text-amber-400 rounded-xl text-xs font-extrabold uppercase tracking-wider shadow hover:bg-gray-900 active:scale-95 transition-all"
+          >
+            Unduh APK Baru
+          </a>
+        </div>
+      )}
+
       {/* SISI KIRI: GRID RUANGAN & WALK-IN BAR (45%) */}
       <div className="w-[45%] p-5 flex flex-col relative z-0 border-r border-gray-800/90 overflow-y-auto">
         <Header 
@@ -766,14 +805,6 @@ function App() {
           setShowHistoryModal={setShowHistoryModal}
           setShowPinModal={setShowPinModal}
         />
-
-        {updateAvailable && (
-          <UpdateBanner 
-            latestVersion={latestVersion} 
-            downloadUrl={downloadUrl} 
-            setUpdateAvailable={setUpdateAvailable} 
-          />
-        )}
 
         <BarHeaderCard 
           isNonRoomMode={isNonRoomMode} 
@@ -792,7 +823,7 @@ function App() {
         />
       </div>
 
-      {/* SISI KANAN: PANEL AKSI KASIR (55% - LEBIH LUAS & LEGA) */}
+      {/* SISI KANAN: PANEL AKSI KASIR (55%) */}
       <div className="w-[55%] p-5 overflow-y-auto relative z-0 border-l bg-[#161a20] border-gray-800/90">
         {isNonRoomMode ? (
           <BarPosPanel 
