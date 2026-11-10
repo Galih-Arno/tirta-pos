@@ -1,98 +1,175 @@
-import { Users, X, Edit2, Trash2, Plus } from 'lucide-react';
+import React from 'react';
+import { X, Plus, Edit2, Trash2, Users, DollarSign } from 'lucide-react';
+import CurrencyInput from '../../components/CurrencyInput';
+import { formatRupiah } from '../../utils/currencyHelpers';
 
 export default function MasterLcModal({
   setShowLcManageModal, editingLc, setEditingLc, handleSaveLcMaster,
-  lcName, setLcName, lcType, setLcType, lcs, db
+  lcName, setLcName, lcType, setLcType,
+  lcRateGuest, setLcRateGuest, lcRateLc, setLcRateLc,
+  lcs, db
 }) {
-  const handleDeleteLc = async (id) => {
-    if (confirm("Hapus data LC ini dari database?")) {
-      await db.lcs.delete(id);
-    }
-  };
+  const guestRateNum = Number(lcRateGuest) || 0;
+  const lcRateNum = Number(lcRateLc) || 0;
+  const houseFeeNum = Math.max(0, guestRateNum - lcRateNum);
 
   const startEdit = (lc) => {
     setEditingLc(lc);
     setLcName(lc.name);
-    setLcType(lc.type);
+    setLcType(lc.type || 'tetap');
+    setLcRateGuest(lc.hourly_rate_guest || 85000);
+    setLcRateLc(lc.hourly_rate_lc || 75000);
   };
 
   const cancelEdit = () => {
     setEditingLc(null);
     setLcName('');
     setLcType('tetap');
+    setLcRateGuest(85000);
+    setLcRateLc(75000);
+  };
+
+  const handleDelete = async (id) => {
+    if (confirm("Hapus data LC ini?")) {
+      await db.lcs.delete(id);
+    }
   };
 
   return (
-    <div className="absolute inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="w-[600px] max-h-[85vh] rounded-2xl border shadow-2xl p-6 flex flex-col bg-card border-gray-700 text-white">
-        <div className="flex justify-between items-center mb-4 border-b pb-3 border-gray-800">
-          <h3 className="text-xl font-serif font-bold text-blue-400 flex items-center">
-            <Users size={20} className="mr-2"/> Master Kelola Ladies Companion (LC)
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-[#161a20] border border-gray-800 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl">
+        {/* Header Modal */}
+        <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-black/40">
+          <h3 className="text-lg font-serif font-bold text-blue-400 flex items-center">
+            <Users size={20} className="mr-2" /> Master Kelola Ladies Companion (LC)
           </h3>
-          <button onClick={() => setShowLcManageModal(false)}><X className="text-gray-400 hover:text-white" /></button>
+          <button onClick={() => setShowLcManageModal(false)} className="text-gray-400 hover:text-white">
+            <X size={20} />
+          </button>
         </div>
 
-        {/* FORM TAMBAH / EDIT LC */}
-        <form onSubmit={handleSaveLcMaster} className="bg-dark p-4 rounded-xl border border-gray-800 mb-4 space-y-3">
-          <div className="font-bold text-xs text-gray-300 uppercase">
-            {editingLc ? `Edit LC: ${editingLc.name}` : 'Tambah Data LC Baru'}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-400 mb-1">Nama Panggilan LC</label>
-              <input type="text" value={lcName} onChange={e => setLcName(e.target.value)} placeholder="Contoh: Siska" className="w-full bg-black/40 border border-gray-700 rounded-lg p-2 text-xs font-bold text-white outline-none focus:border-blue-400" />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-400 mb-1">Status Kemitraan</label>
-              <select value={lcType} onChange={e => setLcType(e.target.value)} className="w-full bg-black/40 border border-gray-700 rounded-lg p-2 text-xs font-bold text-white outline-none focus:border-blue-400">
-                <option value="tetap">Tetap (Reguler)</option>
-                <option value="freelance">Freelance</option>
-              </select>
-            </div>
-          </div>
-          <div className="flex justify-end space-x-2 pt-1">
-            {editingLc && (
-              <button type="button" onClick={cancelEdit} className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs font-bold text-gray-300">
-                Batal Edit
-              </button>
-            )}
-            <button type="submit" className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-bold text-white shadow flex items-center">
-              <Plus size={14} className="mr-1"/> {editingLc ? 'Simpan Perubahan' : 'Tambah LC'}
-            </button>
-          </div>
-        </form>
+        <div className="p-5 space-y-5 max-h-[80vh] overflow-y-auto">
+          {/* Form Input / Edit LC */}
+          <form onSubmit={handleSaveLcMaster} className="bg-[#101318] p-4 rounded-xl border border-gray-800 space-y-3">
+            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+              {editingLc ? `Edit Data LC: ${editingLc.name}` : 'Tambah Data LC Baru'}
+            </h4>
 
-        {/* LIST TABLE LC */}
-        <div className="flex-1 overflow-y-auto pr-1">
-          <table className="w-full text-xs text-left text-gray-300">
-            <thead className="text-[11px] uppercase bg-dark border-b border-gray-800 text-gray-400">
-              <tr>
-                <th className="p-2.5">Nama LC</th>
-                <th className="p-2.5 text-center">Tipe Kemitraan</th>
-                <th className="p-2.5 text-center">Tarif per Jam</th>
-                <th className="p-2.5 text-center">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-800">
-              {lcs?.map(lc => (
-                <tr key={lc.id} className="hover:bg-dark/50">
-                  <td className="p-2.5 font-bold text-white">{lc.name}</td>
-                  <td className="p-2.5 text-center">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${lc.type === 'tetap' ? 'bg-blue-950 text-blue-300 border border-blue-800' : 'bg-purple-950 text-purple-300 border border-purple-800'}`}>
-                      {lc.type}
-                    </span>
-                  </td>
-                  <td className="p-2.5 text-center text-gray-400">Rp 85.000 / Jam</td>
-                  <td className="p-2.5 text-center">
-                    <div className="flex justify-center space-x-1">
-                      <button onClick={() => startEdit(lc)} className="p-1.5 bg-blue-950 hover:bg-blue-900 border border-blue-700 text-blue-300 rounded-lg" title="Edit"><Edit2 size={12}/></button>
-                      <button onClick={() => handleDeleteLc(lc.id)} className="p-1.5 bg-red-950 hover:bg-red-900 border border-red-700 text-red-300 rounded-lg" title="Hapus"><Trash2 size={12}/></button>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-300 mb-1">Nama Panggilan LC</label>
+                <input
+                  type="text"
+                  value={lcName}
+                  onChange={e => setLcName(e.target.value)}
+                  placeholder="Contoh: Siska"
+                  className="w-full bg-[#181d24] border border-gray-700 rounded-xl p-2.5 text-xs text-white outline-none focus:border-blue-500 font-semibold"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-300 mb-1">Status Kemitraan</label>
+                <select
+                  value={lcType}
+                  onChange={e => setLcType(e.target.value)}
+                  className="w-full bg-[#181d24] border border-gray-700 rounded-xl p-2.5 text-xs text-white outline-none focus:border-blue-500 font-semibold"
+                >
+                  <option value="tetap">Tetap (Reguler)</option>
+                  <option value="freelance">Freelance</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Bagi Hasil & Skema Tarif */}
+            <div className="pt-2 border-t border-gray-800/80">
+              <label className="block text-xs font-bold text-amber-400 mb-2 flex items-center">
+                <DollarSign size={14} className="mr-1" /> Pengaturan Tarif per Jam & Bagi Hasil
+              </label>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="block text-[11px] text-gray-400 mb-1">Tarif Ditagih ke Tamu (/jam):</span>
+                  <CurrencyInput
+                    value={lcRateGuest}
+                    onChange={val => setLcRateGuest(val)}
+                    placeholder="Rp 85.000"
+                    className="w-full bg-[#181d24] border border-gray-700 rounded-xl p-2 text-xs font-mono font-bold text-amber-300 outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <span className="block text-[11px] text-gray-400 mb-1">Hak Bersih Diterima LC (/jam):</span>
+                  <CurrencyInput
+                    value={lcRateLc}
+                    onChange={val => setLcRateLc(val)}
+                    placeholder="Rp 75.000"
+                    className="w-full bg-[#181d24] border border-gray-700 rounded-xl p-2 text-xs font-mono font-bold text-green-400 outline-none focus:border-green-500"
+                  />
+                </div>
+              </div>
+
+              {/* Live Preview Profit Margin Owner */}
+              <div className="mt-2.5 bg-blue-950/40 border border-blue-800/60 p-2.5 rounded-xl flex justify-between items-center text-xs">
+                <span className="text-gray-300">Bagian / Fee Tempat Usaha (Owner):</span>
+                <span className="font-mono font-bold text-blue-300">{formatRupiah(houseFeeNum)} / jam</span>
+              </div>
+            </div>
+
+            <div className="flex space-x-2 pt-2">
+              {editingLc && (
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  className="flex-1 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold rounded-xl text-xs"
+                >
+                  Batal
+                </button>
+              )}
+              <button
+                type="submit"
+                className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center justify-center shadow-md"
+              >
+                {editingLc ? 'Simpan Perubahan' : <><Plus size={14} className="mr-1"/> Tambah LC</>}
+              </button>
+            </div>
+          </form>
+
+          {/* Daftar LC */}
+          <div className="space-y-2">
+            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Daftar LC Terdaftar</h4>
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+              {lcs?.map(l => {
+                const rGuest = l.hourly_rate_guest || 85000;
+                const rLc = l.hourly_rate_lc || 75000;
+                const rOwner = Math.max(0, rGuest - rLc);
+
+                return (
+                  <div key={l.id} className="flex justify-between items-center p-3 bg-[#101318] border border-gray-800 rounded-xl">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-sm text-white">{l.name}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase ${
+                          l.type === 'freelance' ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-blue-950 text-blue-300 border border-blue-800'
+                        }`}>
+                          {l.type || 'tetap'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1 font-mono">
+                        Tamu: <strong className="text-amber-400">{formatRupiah(rGuest)}</strong> | LC: <strong className="text-green-400">{formatRupiah(rLc)}</strong> | Owner: <strong className="text-blue-300">{formatRupiah(rOwner)}</strong>
+                      </p>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <div className="flex space-x-1.5">
+                      <button onClick={() => startEdit(l)} className="p-2 bg-gray-800 hover:bg-blue-900 rounded-lg text-blue-400">
+                        <Edit2 size={14} />
+                      </button>
+                      <button onClick={() => handleDelete(l.id)} className="p-2 bg-gray-800 hover:bg-red-900 rounded-lg text-red-400">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
     </div>

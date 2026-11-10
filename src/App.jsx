@@ -6,7 +6,9 @@ import { Clock } from 'lucide-react';
 
 // Imports Utils
 import { calculateBillableHours, calculateLcCost } from './utils/billingHelpers';
+import { formatRupiah } from './utils/currencyHelpers';
 import { handlePrintDraftReceipt, handlePrintReport, handlePrintLcPayoutSlip } from './utils/printHelpers';
+import { checkIsActivated } from './utils/licenseHelpers';
 
 // Imports Components
 import Header from './components/Header';
@@ -30,10 +32,14 @@ import ChangePinModal from './modals/ChangePinModal';
 import MasterRoomModal from './modals/master/MasterRoomModal';
 import MasterFnbModal from './modals/master/MasterFnbModal';
 import MasterLcModal from './modals/master/MasterLcModal';
+import LicenseModal from './modals/LicenseModal';
 
 const CURRENT_APP_VERSION = '1.2.0';
 
 function App() {
+  // State Aktivasi Lisensi Perangkat
+  const [isActivated, setIsActivated] = useState(() => checkIsActivated());
+
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [isNonRoomMode, setIsNonRoomMode] = useState(false);
   
@@ -117,9 +123,12 @@ function App() {
   const [prodSellPrice, setProdSellPrice] = useState('');
   const [prodStock, setProdStock] = useState('');
 
+  // Master LC States (Termasuk Tarif Ditagih Ke Tamu & Hak Bersih LC)
   const [editingLc, setEditingLc] = useState(null);
   const [lcName, setLcName] = useState('');
   const [lcType, setLcType] = useState('tetap');
+  const [lcRateGuest, setLcRateGuest] = useState(85000);
+  const [lcRateLc, setLcRateLc] = useState(75000);
 
   const [fnbCart, setFnbCart] = useState({});
   const [selectedLcIds, setSelectedLcIds] = useState([]);
@@ -141,9 +150,9 @@ function App() {
         }
         if (await db.lcs.count() === 0) {
           await db.lcs.bulkAdd([
-            { name: 'Siska', type: 'tetap', status: 'available' },
-            { name: 'Putri', type: 'tetap', status: 'available' },
-            { name: 'Rina (Freelance)', type: 'freelance', status: 'available' }
+            { name: 'Siska', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
+            { name: 'Putri', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
+            { name: 'Rina (Freelance)', type: 'freelance', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' }
           ]);
         }
       } catch (err) {
@@ -225,7 +234,13 @@ function App() {
     const hours = activeTransaction?.billing_type === 'fixed' 
       ? (activeTransaction.duration_hours || 2)
       : calculateBillableHours(l.start_time || activeTransaction?.start_time, currentTime.toISOString());
-    const cost = calculateLcCost(hours);
+    
+    // Pembacaan tarif dinamis per LC dari DB
+    const masterLc = lcs?.find(m => m.id === l.lc_id || m.name === l.lc_name);
+    const gRate = masterLc?.hourly_rate_guest || 85000;
+    const lRate = masterLc?.hourly_rate_lc || 75000;
+    
+    const cost = calculateLcCost(hours, 'gross', gRate, lRate);
     lcSubtotal += cost;
     return { ...l, hours, cost };
   }) || []);
@@ -624,15 +639,36 @@ function App() {
     setEditingProduct(null); setProdName(''); setProdBuyPrice(''); setProdSellPrice(''); setProdStock('');
   };
 
+  // Handler Simpan Master LC dengan Menyimpan Tarif Kotor Tamu & Hak Bersih LC
   const handleSaveLcMaster = async (e) => {
     e.preventDefault();
     if (!lcName.trim()) return alert("Nama LC wajib diisi!");
+    
+    const guestRate = Number(lcRateGuest) || 85000;
+    const lcRate = Number(lcRateLc) || 75000;
+
     if (editingLc) {
-      await db.lcs.update(editingLc.id, { name: lcName, type: lcType });
+      await db.lcs.update(editingLc.id, { 
+        name: lcName, 
+        type: lcType,
+        hourly_rate_guest: guestRate,
+        hourly_rate_lc: lcRate
+      });
     } else {
-      await db.lcs.add({ name: lcName, type: lcType, status: 'available' });
+      await db.lcs.add({ 
+        name: lcName, 
+        type: lcType, 
+        hourly_rate_guest: guestRate,
+        hourly_rate_lc: lcRate,
+        status: 'available' 
+      });
     }
-    setEditingLc(null); setLcName(''); setLcType('tetap');
+
+    setEditingLc(null); 
+    setLcName(''); 
+    setLcType('tetap');
+    setLcRateGuest(85000);
+    setLcRateLc(75000);
   };
 
   const handleCheckout = async () => {
@@ -711,10 +747,15 @@ function App() {
     }
   };
 
+  // CHECKPOINTS AKTIVASI LISENSI: Jika Perangkat Belum Terdaftar/Terverifikasi, Kunci Akses POS
+  if (!isActivated) {
+    return <LicenseModal setIsActivated={setIsActivated} />;
+  }
+
   return (
-    <div className="flex h-screen font-sans overflow-hidden bg-[#0f0f0f] text-white">
-      {/* SISI KIRI: GRID RUANGAN & WALK-IN BAR */}
-      <div className="w-[60%] p-6 flex flex-col relative z-0 border-r border-gray-800">
+    <div className="flex h-screen font-sans overflow-hidden bg-[#0d0f12] text-white">
+      {/* SISI KIRI: GRID RUANGAN & WALK-IN BAR (45%) */}
+      <div className="w-[45%] p-5 flex flex-col relative z-0 border-r border-gray-800/90 overflow-y-auto">
         <Header 
           userRole={userRole} 
           setUserRole={setUserRole} 
@@ -751,8 +792,8 @@ function App() {
         />
       </div>
 
-      {/* SISI KANAN: PANEL AKSI KASIR */}
-      <div className="w-[40%] p-6 overflow-y-auto relative z-0 border-l bg-[#161616] border-gray-800">
+      {/* SISI KANAN: PANEL AKSI KASIR (55% - LEBIH LUAS & LEGA) */}
+      <div className="w-[55%] p-5 overflow-y-auto relative z-0 border-l bg-[#161a20] border-gray-800/90">
         {isNonRoomMode ? (
           <BarPosPanel 
             setIsNonRoomMode={setIsNonRoomMode}
@@ -776,7 +817,10 @@ function App() {
           />
         ) : selectedRoom ? (
           <div>
-            <h2 className="text-2xl font-serif font-bold mb-6 text-white">{selectedRoom.room_number}</h2>
+            <h2 className="text-2xl font-serif font-bold mb-4 text-white flex items-center justify-between">
+              <span>{selectedRoom.room_number}</span>
+              <span className="text-xs font-sans text-gray-400 font-normal">Tarif: {formatRupiah(selectedRoom.hourly_rate || 50000)}/jam</span>
+            </h2>
             {selectedRoom.status === 'available' ? (
               <RoomCheckInForm 
                 guestName={guestName} setGuestName={setGuestName}
@@ -810,9 +854,9 @@ function App() {
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500">
-            <Clock size={64} className="mb-4 opacity-40 animate-pulse" />
-            <p className="text-xl font-medium">Pilih ruangan di sebelah kiri atau buka Kasir Bar</p>
+          <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-3">
+            <Clock size={64} className="opacity-30 animate-pulse text-amber-500" />
+            <p className="text-lg font-medium text-gray-400 text-center">Pilih salah satu ruangan di sebelah kiri atau buka Kasir Bar</p>
           </div>
         )}
       </div>
@@ -849,6 +893,8 @@ function App() {
           setShowLcManageModal={setShowLcManageModal} editingLc={editingLc} 
           setEditingLc={setEditingLc} handleSaveLcMaster={handleSaveLcMaster} 
           lcName={lcName} setLcName={setLcName} lcType={lcType} setLcType={setLcType} 
+          lcRateGuest={lcRateGuest} setLcRateGuest={setLcRateGuest}
+          lcRateLc={lcRateLc} setLcRateLc={setLcRateLc}
           lcs={lcs} db={db}
         />
       )}

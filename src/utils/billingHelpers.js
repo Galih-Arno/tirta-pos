@@ -15,11 +15,31 @@ export function calculateBillableHours(startIso, endIso = null) {
   return Math.max(0.5, finalBlocks * 0.5);
 }
 
-export function calculateLcCost(hours) {
-  if (hours <= 0) return 0;
+/**
+ * Kalkulasi rincian tarif kotor, hak LC, dan house share berdasarkan objek LC atau masukan manual
+ */
+export function calculateLcCostDetails(hours, guestHourly = 85000, lcShareHourly = 75000) {
+  if (hours <= 0) return { gross: 0, lcShare: 0, houseShare: 0 };
+  
   const fullHours = Math.floor(hours);
-  const hasHalfHour = (hours % 1) >= 0.5;
-  return (fullHours * 85000) + (hasHalfHour ? 45000 : 0);
+  const hasHalf = (hours % 1) >= 0.5;
+
+  // Rasio 30 menit disesuaikan proporsional
+  const guestHalf = Math.round(guestHourly / 2) + (guestHourly % 20000 === 0 ? 0 : 2500); 
+  const lcHalf = Math.round(lcShareHourly / 2) + (lcShareHourly % 20000 === 0 ? 0 : 2500);
+
+  const gross = (fullHours * guestHourly) + (hasHalf ? guestHalf : 0);
+  const lcShare = (fullHours * lcShareHourly) + (hasHalf ? lcHalf : 0);
+  const houseShare = Math.max(0, gross - lcShare);
+
+  return { gross, lcShare, houseShare };
+}
+
+export function calculateLcCost(hours, type = 'gross', guestHourly = 85000, lcShareHourly = 75000) {
+  const details = calculateLcCostDetails(hours, guestHourly, lcShareHourly);
+  if (type === 'lc_share') return details.lcShare;
+  if (type === 'house_share') return details.houseShare;
+  return details.gross;
 }
 
 export function formatDurationLabel(hours) {
@@ -32,28 +52,23 @@ export function formatDurationLabel(hours) {
   return `${hours} Jam`;
 }
 
-export function getLcCalculationDetail(hours) {
+export function getLcCalculationDetail(hours, guestHourly = 85000) {
   if (!hours || hours <= 0) return '0 Jam';
   const fullH = Math.floor(hours);
   const hasHalf = (hours % 1) >= 0.5;
+  const guestHalf = Math.round(guestHourly / 2) + (guestHourly % 20000 === 0 ? 0 : 2500);
 
   const parts = [];
-  if (fullH > 0) parts.push(`${fullH} jam (@ Rp 85.000)`);
-  if (hasHalf) parts.push(`30 mnt (@ Rp 45.000)`);
+  if (fullH > 0) parts.push(`${fullH} jam (@ Rp ${guestHourly.toLocaleString('id-ID')})`);
+  if (hasHalf) parts.push(`30 mnt (@ Rp ${guestHalf.toLocaleString('id-ID')})`);
   return parts.join(' + ');
 }
 
-/**
- * Menghitung nominal bersih uang yang benar-benar masuk ke kasir (dikurangi kembalian)
- */
 export function calculateNetPayment(amountPaid = 0, changeGiven = 0) {
   return Math.max(0, (amountPaid || 0) - (changeGiven || 0));
 }
 
-/**
- * Menghitung akumulasi lengkap neraca transaksi berjalan / selesai
- */
-export function calculateTransactionSummary(trx, trxFnb = [], trxLcs = [], trxPayments = [], roomRate = 50000) {
+export function calculateTransactionSummary(trx, trxFnb = [], trxLcs = [], trxPayments = [], roomRate = 50000, lcsMaster = []) {
   if (!trx) {
     return {
       roomSubtotal: 0,
@@ -74,14 +89,16 @@ export function calculateTransactionSummary(trx, trxFnb = [], trxLcs = [], trxPa
   
   const lcSubtotal = trxLcs.reduce((sum, item) => {
     const hours = item.hours || durationHours;
-    return sum + calculateLcCost(hours);
+    const masterLc = lcsMaster.find(l => l.id === item.lc_id);
+    const guestRate = masterLc?.hourly_rate_guest || 85000;
+    const lcRate = masterLc?.hourly_rate_lc || 75000;
+    return sum + calculateLcCost(hours, 'gross', guestRate, lcRate);
   }, 0);
 
   const grossTotal = roomSubtotal + fnbSubtotal + lcSubtotal;
   const discount = trx.discount || 0;
   const netTotal = Math.max(0, grossTotal - discount);
 
-  // Perhitungan total dana tunai/transfer bersih yang sudah diterima
   let totalPaidNet = 0;
   if (trxPayments && trxPayments.length > 0) {
     totalPaidNet = trxPayments.reduce((sum, p) => sum + calculateNetPayment(p.amount_paid, p.change_given), 0);
