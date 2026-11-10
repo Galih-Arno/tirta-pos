@@ -141,8 +141,10 @@ function App() {
     const initData = async () => {
       try {
         await seedInitialData();
-        if (await db.products.count() === 0) {
-          await db.products.bulkAdd([
+        // --- 1. SINKRONISASI PRODUK F&B ---
+        // Kosongkan atau perbarui agar tidak terjadi penumpukan data ganda
+        await db.products.clear(); 
+        await db.products.bulkAdd([
             { name: 'Anggur Merah', buy_price: 0, sell_price: 115000, stock: 0, status: 'active' },
             { name: 'Pigurr', buy_price: 0, sell_price: 100000, stock: 0, status: 'active' },
             { name: 'Atlas', buy_price: 0, sell_price: 140000, stock: 0, status: 'active' },
@@ -167,16 +169,17 @@ function App() {
             { name: 'Dunhill', buy_price: 0, sell_price: 50000, stock: 0, status: 'active' },
             { name: 'Bull', buy_price: 0, sell_price: 45000, stock: 0, status: 'active' }
           ]);
-        }
-        if (await db.lcs.count() === 0) {
-          await db.lcs.bulkAdd([
+        
+        // --- 2. SINKRONISASI DATA LC ---
+        await db.lcs.clear();
+        await db.lcs.bulkAdd([
             { name: 'AnjeLL', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
             { name: 'Givia', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
             { name: 'Lita', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
             { name: 'Putri', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
             { name: 'Sisil', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' }
           ]);
-        }
+        
       } catch (err) {
         console.error("Gagal inisialisasi Database:", err);
       }
