@@ -12,7 +12,6 @@ import { checkIsActivated } from './utils/licenseHelpers';
 
 // Imports Components
 import Header from './components/Header';
-import UpdateBanner from './components/UpdateBanner';
 import BarHeaderCard from './components/BarHeaderCard';
 import RoomGrid from './components/RoomGrid';
 import RoomCheckInForm from './components/RoomCheckInForm';
@@ -123,7 +122,7 @@ function App() {
   const [prodSellPrice, setProdSellPrice] = useState('');
   const [prodStock, setProdStock] = useState('');
 
-  // Master LC States (Termasuk Tarif Ditagih Ke Tamu & Hak Bersih LC)
+  // Master LC States
   const [editingLc, setEditingLc] = useState(null);
   const [lcName, setLcName] = useState('');
   const [lcType, setLcType] = useState('tetap');
@@ -138,13 +137,16 @@ function App() {
   const [currentTime, setCurrentTime] = useState(dayjs());
 
   useEffect(() => {
+    let isSubscribed = true;
+
     const initData = async () => {
       try {
         await seedInitialData();
-        // --- 1. SINKRONISASI PRODUK F&B ---
-        // Kosongkan atau perbarui agar tidak terjadi penumpukan data ganda
-        await db.products.clear(); 
-        await db.products.bulkAdd([
+
+        // 1. Cek & Isi Data F&B hanya jika tabel kosong
+        const productCount = await db.products.count();
+        if (productCount === 0 && isSubscribed) {
+          await db.products.bulkAdd([
             { name: 'Anggur Merah', buy_price: 0, sell_price: 115000, stock: 0, status: 'active' },
             { name: 'Pigurr', buy_price: 0, sell_price: 100000, stock: 0, status: 'active' },
             { name: 'Atlas', buy_price: 0, sell_price: 140000, stock: 0, status: 'active' },
@@ -169,17 +171,19 @@ function App() {
             { name: 'Dunhill', buy_price: 0, sell_price: 50000, stock: 0, status: 'active' },
             { name: 'Bull', buy_price: 0, sell_price: 45000, stock: 0, status: 'active' }
           ]);
+        }
         
-        // --- 2. SINKRONISASI DATA LC ---
-        await db.lcs.clear();
-        await db.lcs.bulkAdd([
+        // 2. Cek & Isi Data LC hanya jika tabel kosong
+        const lcCount = await db.lcs.count();
+        if (lcCount === 0 && isSubscribed) {
+          await db.lcs.bulkAdd([
             { name: 'AnjeLL', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
             { name: 'Givia', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
             { name: 'Lita', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
             { name: 'Putri', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' },
             { name: 'Sisil', type: 'tetap', hourly_rate_guest: 85000, hourly_rate_lc: 75000, status: 'available' }
           ]);
-        
+        }
       } catch (err) {
         console.error("Gagal inisialisasi Database:", err);
       }
@@ -191,7 +195,7 @@ function App() {
         const res = await fetch('https://api.github.com/repos/Galih-Arno/tirta-pos/releases/latest', {
           headers: { 'Accept': 'application/vnd.github.v3+json' }
         });
-        if (res.ok) {
+        if (res.ok && isSubscribed) {
           const data = await res.json();
           const latestTag = data.tag_name?.replace('v', '') || '';
           if (latestTag && latestTag !== CURRENT_APP_VERSION) {
@@ -207,8 +211,14 @@ function App() {
     };
     checkAppUpdate();
 
-    const timer = setInterval(() => setCurrentTime(dayjs()), 1000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => {
+      if (isSubscribed) setCurrentTime(dayjs());
+    }, 1000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(timer);
+    };
   }, []);
 
   const rooms = useLiveQuery(() => db.rooms.toArray());
