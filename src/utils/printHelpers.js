@@ -8,85 +8,32 @@ import {
   calculateTransactionSummary 
 } from './billingHelpers';
 
-// Variable global untuk menyimpan sesi koneksi Bluetooth Printer
-let bluetoothDevice = null;
+// Helper cetak pintar via RawBT (Android) / Window Print (PC)
+const sendToThermalPrinter = (htmlContent) => {
+  try {
+    const base64Html = btoa(unescape(encodeURIComponent(htmlContent)));
+    
+    // Deteksi jika berjalan di HP/Tablet Android
+    const isAndroid = /Android/i.test(navigator.userAgent) || window.Capacitor;
 
-// Helper Konversi HTML ke ESC/POS Raster Image via Web Bluetooth
-const sendToThermalPrinter = async (htmlContent) => {
-  const isAndroid = /Android/i.test(navigator.userAgent) || window.Capacitor;
-
-  if (isAndroid && navigator.bluetooth) {
-    try {
-      // 1. Hubungkan / Gunakan Perangkat Bluetooth VSC yang Sudah Terhubung
-      if (!bluetoothDevice || !bluetoothDevice.gatt.connected) {
-        bluetoothDevice = await navigator.bluetooth.requestDevice({
-          filters: [
-            { namePrefix: 'VSC' },
-            { namePrefix: 'MP-80' },
-            { namePrefix: 'RP' },
-            { namePrefix: 'Printer' }
-          ],
-          optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb', '49535343-fe7d-41a3-9020-805056926704']
-        });
-      }
-
-      const server = await bluetoothDevice.gatt.connect();
-      const primaryServices = await server.getPrimaryServices();
-      let printCharacteristic = null;
-
-      for (const service of primaryServices) {
-        const characteristics = await service.getCharacteristics();
-        for (const char of characteristics) {
-          if (char.properties.write || char.properties.writeWithoutResponse) {
-            printCharacteristic = char;
-            break;
-          }
-        }
-        if (printCharacteristic) break;
-      }
-
-      if (!printCharacteristic) {
-        throw new Error("Layanan Bluetooth Printer tidak ditemukan.");
-      }
-
-      // 2. Render HTML ke Canvas Gambar secara Tersembunyi
-      const container = document.createElement('div');
-      container.style.position = 'absolute';
-      container.style.left = '-9999px';
-      container.style.width = '576px'; // Lebar standar 80mm thermal (576 dot)
-      container.innerHTML = htmlContent;
-      document.body.appendChild(container);
-
-      // Gunakan html2canvas jika tersedia, atau konversi teks sederhana
-      // Perintah Inisialisasi ESC/POS & Potong Kertas Auto-Cutter
-      const initCommand = new Uint8Array([0x1B, 0x40]); // ESC @
-      const cutCommand = new Uint8Array([0x1D, 0x56, 0x42, 0x00]); // GS V B (Full Cut)
-
-      await printCharacteristic.writeValue(initCommand);
-
-      // (Pengiriman Byte Struk Direct)
-      document.body.removeChild(container);
-
-      // Potong Kertas Otomatis
-      await printCharacteristic.writeValue(cutCommand);
-
-    } catch (err) {
-      console.warn("Bluetooth Direct gagal, beralih ke Fallback Intent:", err);
-      // Fallback jika Bluetooth Web ditolak browser HP
-      const base64Html = btoa(unescape(encodeURIComponent(htmlContent)));
-      window.location.href = `intent:${base64Html}#Intent;scheme=rawbt;package=ru.a404m.rawbt;S.content_type=text/html;end;`;
-    }
-  } else {
-    // Jalur Laptop / PC (Linux Mint / Windows)
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-      printWindow.focus();
-      setTimeout(() => { printWindow.print(); }, 500);
+    if (isAndroid) {
+      // Pemicu langsung aplikasi RawBT via Direct Schema Protocol
+      window.location.href = `rawbt:base64,${base64Html}`;
     } else {
-      alert("Pop-up terblokir! Izinkan pop-up di browser Anda.");
+      // Jendela cetak standar untuk Laptop / PC (Linux Mint)
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => { printWindow.print(); }, 500);
+      } else {
+        alert("Pop-up terblokir! Izinkan pop-up di browser Anda.");
+      }
     }
+  } catch (err) {
+    console.error("Print Error:", err);
+    alert("Gagal memproses cetak struk: " + err.message);
   }
 };
 
