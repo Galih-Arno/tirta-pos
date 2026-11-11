@@ -8,10 +8,31 @@ import {
   calculateTransactionSummary 
 } from './billingHelpers';
 
-// Helper fungsi untuk mencetak langsung menggunakan RawBT Protocol (Thermal 80mm)
-const printRawBT = (htmlContent) => {
-  const base64Html = btoa(unescape(encodeURIComponent(htmlContent)));
-  window.location.href = `intent:${base64Html}#Intent;scheme=rawbt;package=ru.a404m.rawbt;S.content_type=text/html;end;`;
+// Helper cetak pintar (Android -> RawBT, PC -> Dialog Browser)
+const sendToThermalPrinter = (htmlContent) => {
+  try {
+    const base64Html = btoa(unescape(encodeURIComponent(htmlContent)));
+    
+    // Deteksi apakah dijalankan di HP/Tablet Android
+    const isAndroid = /Android/i.test(navigator.userAgent) && !/Linux x86_64|Linux i686/i.test(navigator.userAgent);
+
+    if (isAndroid) {
+      window.location.href = `rawbt:base64,${base64Html}`;
+    } else {
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => { printWindow.print(); }, 500);
+      } else {
+        alert("Pop-up terblokir! Silakan izinkan pop-up di browser Anda.");
+      }
+    }
+  } catch (err) {
+    console.error("Print Error:", err);
+    alert("Gagal memproses cetak struk: " + err.message);
+  }
 };
 
 export const handlePrintDraftReceipt = async (trxToPrint, rooms, db) => {
@@ -190,7 +211,7 @@ export const handlePrintDraftReceipt = async (trxToPrint, rooms, db) => {
     </html>
   `;
 
-  printRawBT(receiptHtml);
+  sendToThermalPrinter(receiptHtml);
 };
 
 export const handlePrintReport = async (allTransactions, reportStartDate, reportEndDate, db) => {
@@ -232,7 +253,6 @@ export const handlePrintReport = async (allTransactions, reportStartDate, report
     grossFnbTotal += (trx.fnb_subtotal || 0);
     totalDiscount += (trx.discount || 0);
 
-    // Rekap LC (Membaca tarif individual per LC)
     const trxLcs = await db.transaction_lcs.where('transaction_id').equals(trx.id).toArray();
     const hours = trx.duration_hours || 0;
     for (const l of trxLcs) {
@@ -252,7 +272,6 @@ export const handlePrintReport = async (allTransactions, reportStartDate, report
       lcSummary[l.lc_name].gross += details.gross;
     }
 
-    // Rekap Penjualan F&B
     const trxFnb = await db.transaction_fnb.where('transaction_id').equals(trx.id).toArray();
     for (const f of trxFnb) {
       if (!fnbSummary[f.product_name]) fnbSummary[f.product_name] = { qty: 0, total: 0 };
@@ -268,189 +287,186 @@ export const handlePrintReport = async (allTransactions, reportStartDate, report
   const sumFnbQty = Object.values(fnbSummary).reduce((a, b) => a + b.qty, 0);
 
   const printWindow = window.open('', '_blank');
-  printWindow.document.write(`
-    <html>
-      <head>
-        <title>Laporan Pembukuan Eksekutif Owner - Tirta Perkasa Karaoke</title>
-        <style>
-          @page { size: A4 portrait; margin: 8mm 10mm; }
-          * { box-sizing: border-box; }
-          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 0; color: #1a1a1a; font-size: 10px; background: #fff; }
-          
-          .header-container { text-align: center; border-bottom: 2px solid #1a1a1a; padding-bottom: 6px; margin-bottom: 10px; position: relative; }
-          .logo-report { max-height: 46px; width: auto; margin-bottom: 4px; }
-          h2 { font-size: 16px; margin: 0; color: #000; text-transform: uppercase; letter-spacing: 0.5px; }
-          h3 { font-size: 12px; margin: 2px 0 0 0; color: #333; font-weight: 600; }
-          .subtitle { font-size: 10px; color: #666; margin-top: 2px; }
-          
-          /* KPI Cards Summary */
-          .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
-          .kpi-card { border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; background: #f8fafc; text-align: center; }
-          .kpi-card.highlight { background: #eff6ff; border-color: #93c5fd; }
-          .kpi-card.alert { background: #fef2f2; border-color: #fca5a5; }
-          .kpi-title { font-size: 8.5px; text-transform: uppercase; font-weight: bold; color: #475569; margin-bottom: 2px; }
-          .kpi-value { font-size: 13px; font-weight: bold; color: #0f172a; }
-          .kpi-card.alert .kpi-value { color: #dc2626; }
-          .kpi-card.highlight .kpi-value { color: #1d4ed8; }
+  if (printWindow) {
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Laporan Pembukuan Eksekutif Owner - Tirta Perkasa Karaoke</title>
+          <style>
+            @page { size: A4 portrait; margin: 8mm 10mm; }
+            * { box-sizing: border-box; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 0; color: #1a1a1a; font-size: 10px; background: #fff; }
+            
+            .header-container { text-align: center; border-bottom: 2px solid #1a1a1a; padding-bottom: 6px; margin-bottom: 10px; position: relative; }
+            .logo-report { max-height: 46px; width: auto; margin-bottom: 4px; }
+            h2 { font-size: 16px; margin: 0; color: #000; text-transform: uppercase; letter-spacing: 0.5px; }
+            h3 { font-size: 12px; margin: 2px 0 0 0; color: #333; font-weight: 600; }
+            .subtitle { font-size: 10px; color: #666; margin-top: 2px; }
+            
+            .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+            .kpi-card { border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; background: #f8fafc; text-align: center; }
+            .kpi-card.highlight { background: #eff6ff; border-color: #93c5fd; }
+            .kpi-card.alert { background: #fef2f2; border-color: #fca5a5; }
+            .kpi-title { font-size: 8.5px; text-transform: uppercase; font-weight: bold; color: #475569; margin-bottom: 2px; }
+            .kpi-value { font-size: 13px; font-weight: bold; color: #0f172a; }
+            .kpi-card.alert .kpi-value { color: #dc2626; }
+            .kpi-card.highlight .kpi-value { color: #1d4ed8; }
 
-          /* Section Boxes */
-          .section-title { font-size: 10px; font-weight: bold; text-transform: uppercase; color: #1e293b; margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px solid #cbd5e1; }
-          .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
-          
-          table { width: 100%; border-collapse: collapse; margin-top: 2px; margin-bottom: 4px; }
-          th, td { border: 1px solid #cbd5e1; padding: 4px 6px; font-size: 9.5px; text-align: left; }
-          th { background-color: #f1f5f9; font-weight: bold; color: #334155; }
-          tfoot tr { background-color: #f8fafc; font-weight: bold; }
-          tfoot td { border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; font-size: 10px; }
-          .text-right { text-align: right; }
-          .text-center { text-align: center; }
-          .bold { font-weight: bold; }
-          
-          .signature { margin-top: 16px; display: flex; justify-content: space-between; page-break-inside: avoid; }
-          .sig-box { text-align: center; width: 180px; font-size: 10px; }
-          .sig-line { margin-top: 38px; border-top: 1px solid #000; font-weight: bold; }
-        </style>
-      </head>
-      <body>
-        <div class="header-container">
-          ${logoBase64 ? `<img src="${logoBase64}" class="logo-report" alt="Tirta Perkasa Karaoke" />` : ''}
-          <h2>TIRTA PERKASA KARAOKE</h2>
-          <div class="subtitle">Desa Purworejo, Kec. Pasir Sakti, Kab. Lampung Timur, Lampung</div>
-          <h3>LAPORAN PEMBUKUAN KEUANGAN EKSEKUTIF OWNER</h3>
-          <div class="subtitle"><strong>Owner:</strong> I Ketut Sunetre &nbsp;|&nbsp; <strong>Periode Audit:</strong> ${reportStartDate} s/d ${reportEndDate} &nbsp;|&nbsp; <strong>Total Trx Selesai:</strong> ${reportTrx.length} Nota</div>
-        </div>
-
-        <!-- 1. KPI SUMMARY CARDS -->
-        <div class="kpi-grid">
-          <div class="kpi-card">
-            <div class="kpi-title">TOTAL OMZET KOTOR (GROSS)</div>
-            <div class="kpi-value">Rp ${grossSalesTotal.toLocaleString('id-ID')}</div>
-          </div>
-          <div class="kpi-card">
-            <div class="kpi-title">TOTAL HAK BERSIH LC</div>
-            <div class="kpi-value">Rp ${totalLcNetShare.toLocaleString('id-ID')}</div>
-          </div>
-          <div class="kpi-card highlight">
-            <div class="kpi-title">PENDAPATAN BERSIH USAHA</div>
-            <div class="kpi-value">Rp ${netBusinessSales.toLocaleString('id-ID')}</div>
-          </div>
-          <div class="kpi-card alert">
-            <div class="kpi-title">TOTAL PIUTANG / KASBON</div>
-            <div class="kpi-value">Rp ${totalDebt.toLocaleString('id-ID')}</div>
-          </div>
-        </div>
-
-        <!-- 2 & 3. BREAKDOWN PENDAPATAN & AUDIT ARUS KAS -->
-        <div class="grid-2">
-          <div>
-            <div class="section-title">A. RINCIAN PENDAPATAN KOTOR & MARGIN</div>
-            <table>
-              <tr><td>Pendapatan Sewa Ruangan (Room)</td><td class="text-right bold">Rp ${grossRoomTotal.toLocaleString('id-ID')}</td></tr>
-              <tr><td>Penjualan F&B / Minuman Bar</td><td class="text-right bold">Rp ${grossFnbTotal.toLocaleString('id-ID')}</td></tr>
-              <tr><td>Pendapatan Layanan LC (Total Tagihan Tamu)</td><td class="text-right bold">Rp ${grossLcCharged.toLocaleString('id-ID')}</td></tr>
-              <tr style="background:#f8fafc;"><td><strong>Total Omzet Kotor (Akumulasi)</strong></td><td class="text-right bold"><strong>Rp ${grossSalesTotal.toLocaleString('id-ID')}</strong></td></tr>
-              <tr><td>Potongan Diskon Khusus Owner</td><td class="text-right" style="color:#dc2626;">- Rp ${totalDiscount.toLocaleString('id-ID')}</td></tr>
-              <tr><td>Titipan Hak Bersih LC (Keluaran Gaji LC)</td><td class="text-right" style="color:#dc2626;">- Rp ${totalLcNetShare.toLocaleString('id-ID')}</td></tr>
-              <tr style="background:#f0fdf4;"><td><strong>Fee Manajemen Tempat dari LC (House Share)</strong></td><td class="text-right bold" style="color:#166534;">+ Rp ${totalHouseLcShare.toLocaleString('id-ID')}</td></tr>
-              <tr style="background:#eff6ff;"><td><strong>NET REVENUE (PENDAPATAN BERSIH OWNER)</strong></td><td class="text-right bold" style="color:#1d4ed8;"><strong>Rp ${netBusinessSales.toLocaleString('id-ID')}</strong></td></tr>
-            </table>
+            .section-title { font-size: 10px; font-weight: bold; text-transform: uppercase; color: #1e293b; margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px solid #cbd5e1; }
+            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+            
+            table { width: 100%; border-collapse: collapse; margin-top: 2px; margin-bottom: 4px; }
+            th, td { border: 1px solid #cbd5e1; padding: 4px 6px; font-size: 9.5px; text-align: left; }
+            th { background-color: #f1f5f9; font-weight: bold; color: #334155; }
+            tfoot tr { background-color: #f8fafc; font-weight: bold; }
+            tfoot td { border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a; font-size: 10px; }
+            .text-right { text-align: right; }
+            .text-center { text-align: center; }
+            .bold { font-weight: bold; }
+            
+            .signature { margin-top: 16px; display: flex; justify-content: space-between; page-break-inside: avoid; }
+            .sig-box { text-align: center; width: 180px; font-size: 10px; }
+            .sig-line { margin-top: 38px; border-top: 1px solid #000; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <div class="header-container">
+            ${logoBase64 ? `<img src="${logoBase64}" class="logo-report" alt="Tirta Perkasa Karaoke" />` : ''}
+            <h2>TIRTA PERKASA KARAOKE</h2>
+            <div class="subtitle">Desa Purworejo, Kec. Pasir Sakti, Kab. Lampung Timur, Lampung</div>
+            <h3>LAPORAN PEMBUKUAN KEUANGAN EKSEKUTIF OWNER</h3>
+            <div class="subtitle"><strong>Owner:</strong> I Ketut Sunetre &nbsp;|&nbsp; <strong>Periode Audit:</strong> ${reportStartDate} s/d ${reportEndDate} &nbsp;|&nbsp; <strong>Total Trx Selesai:</strong> ${reportTrx.length} Nota</div>
           </div>
 
-          <div>
-            <div class="section-title">B. AUDIT ARUS KAS & ALIRAN FISIK DAN DIGITAL</div>
-            <table>
-              <tr><td>Uang Tunai Bersih di Laci Kasir (Cash Nett)</td><td class="text-right bold">Rp ${totalCash.toLocaleString('id-ID')}</td></tr>
-              <tr><td>Uang Masuk Rekening (Transfer / QRIS)</td><td class="text-right bold">Rp ${totalTransfer.toLocaleString('id-ID')}</td></tr>
-              <tr style="background:#f8fafc;"><td><strong>Total Dana Masuk Diterima Kasir</strong></td><td class="text-right bold"><strong>Rp ${(totalCash + totalTransfer).toLocaleString('id-ID')}</strong></td></tr>
-              <tr><td>Tunggakan Piutang / Kasbon Tamu Belum Lunas</td><td class="text-right bold" style="color:#dc2626;">Rp ${totalDebt.toLocaleString('id-ID')}</td></tr>
-            </table>
-          </div>
-        </div>
-
-        <!-- 4. ITEM RECAPS (LC & F&B TOP SALES) DENGAN TOTAL FOOTER & FEE OWNER -->
-        <div class="grid-2">
-          <div>
-            <div class="section-title">C. REKAPITULASI JAM TERBANG & KOMISI LC</div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Nama LC</th>
-                  <th class="text-center">Jam Kerja</th>
-                  <th class="text-right">Hak Bersih LC</th>
-                  <th class="text-right">Fee Tempat</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${Object.keys(lcSummary).length === 0 ? '<tr><td colspan="4" class="text-center">Tidak ada transaksi LC pada periode ini</td></tr>' : 
-                  Object.entries(lcSummary).map(([name, data]) => `
-                    <tr>
-                      <td class="bold">${name}</td>
-                      <td class="text-center">${data.hours.toFixed(1)} Jam</td>
-                      <td class="text-right bold">Rp ${Math.round(data.lcShare).toLocaleString('id-ID')}</td>
-                      <td class="text-right font-mono" style="color:#15803d;">Rp ${Math.round(data.houseShare).toLocaleString('id-ID')}</td>
-                    </tr>
-                  `).join('')
-                }
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td class="bold">TOTAL</td>
-                  <td class="text-center bold">${sumLcHours.toFixed(1)} Jam</td>
-                  <td class="text-right bold">Rp ${Math.round(totalLcNetShare).toLocaleString('id-ID')}</td>
-                  <td class="text-right bold" style="color:#166534;">Rp ${Math.round(totalHouseLcShare).toLocaleString('id-ID')}</td>
-                </tr>
-              </tfoot>
-            </table>
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-title">TOTAL OMZET KOTOR (GROSS)</div>
+              <div class="kpi-value">Rp ${grossSalesTotal.toLocaleString('id-ID')}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-title">TOTAL HAK BERSIH LC</div>
+              <div class="kpi-value">Rp ${totalLcNetShare.toLocaleString('id-ID')}</div>
+            </div>
+            <div class="kpi-card highlight">
+              <div class="kpi-title">PENDAPATAN BERSIH USAHA</div>
+              <div class="kpi-value">Rp ${netBusinessSales.toLocaleString('id-ID')}</div>
+            </div>
+            <div class="kpi-card alert">
+              <div class="kpi-title">TOTAL PIUTANG / KASBON</div>
+              <div class="kpi-value">Rp ${totalDebt.toLocaleString('id-ID')}</div>
+            </div>
           </div>
 
-          <div>
-            <div class="section-title">D. DETAIL PENJUALAN F&B PER PRODUK</div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Nama Produk F&B</th>
-                  <th class="text-center">Terjual</th>
-                  <th class="text-right">Total Nominal</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${Object.keys(fnbSummary).length === 0 ? '<tr><td colspan="3" class="text-center">Tidak ada transaksi F&B pada periode ini</td></tr>' : 
-                  Object.entries(fnbSummary).map(([name, data]) => `
-                    <tr>
-                      <td class="bold">${name}</td>
-                      <td class="text-center bold">${data.qty} pcs</td>
-                      <td class="text-right bold">Rp ${data.total.toLocaleString('id-ID')}</td>
-                    </tr>
-                  `).join('')
-                }
-              </tbody>
-              <tfoot>
-                <tr>
-                  <td class="bold">TOTAL</td>
-                  <td class="text-center bold">${sumFnbQty} pcs</td>
-                  <td class="text-right bold">Rp ${grossFnbTotal.toLocaleString('id-ID')}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
+          <div class="grid-2">
+            <div>
+              <div class="section-title">A. RINCIAN PENDAPATAN KOTOR & MARGIN</div>
+              <table>
+                <tr><td>Pendapatan Sewa Ruangan (Room)</td><td class="text-right bold">Rp ${grossRoomTotal.toLocaleString('id-ID')}</td></tr>
+                <tr><td>Penjualan F&B / Minuman Bar</td><td class="text-right bold">Rp ${grossFnbTotal.toLocaleString('id-ID')}</td></tr>
+                <tr><td>Pendapatan Layanan LC (Total Tagihan Tamu)</td><td class="text-right bold">Rp ${grossLcCharged.toLocaleString('id-ID')}</td></tr>
+                <tr style="background:#f8fafc;"><td><strong>Total Omzet Kotor (Akumulasi)</strong></td><td class="text-right bold"><strong>Rp ${grossSalesTotal.toLocaleString('id-ID')}</strong></td></tr>
+                <tr><td>Potongan Diskon Khusus Owner</td><td class="text-right" style="color:#dc2626;">- Rp ${totalDiscount.toLocaleString('id-ID')}</td></tr>
+                <tr><td>Titipan Hak Bersih LC (Keluaran Gaji LC)</td><td class="text-right" style="color:#dc2626;">- Rp ${totalLcNetShare.toLocaleString('id-ID')}</td></tr>
+                <tr style="background:#f0fdf4;"><td><strong>Fee Manajemen Tempat dari LC (House Share)</strong></td><td class="text-right bold" style="color:#166534;">+ Rp ${totalHouseLcShare.toLocaleString('id-ID')}</td></tr>
+                <tr style="background:#eff6ff;"><td><strong>NET REVENUE (PENDAPATAN BERSIH OWNER)</strong></td><td class="text-right bold" style="color:#1d4ed8;"><strong>Rp ${netBusinessSales.toLocaleString('id-ID')}</strong></td></tr>
+              </table>
+            </div>
 
-        <div class="signature">
-          <div class="sig-box">
-            <div>Dibuat Oleh (Kasir / Admin):</div>
-            <div class="sig-line">Staf Operasional POS</div>
+            <div>
+              <div class="section-title">B. AUDIT ARUS KAS & ALIRAN FISIK DAN DIGITAL</div>
+              <table>
+                <tr><td>Uang Tunai Bersih di Laci Kasir (Cash Nett)</td><td class="text-right bold">Rp ${totalCash.toLocaleString('id-ID')}</td></tr>
+                <tr><td>Uang Masuk Rekening (Transfer / QRIS)</td><td class="text-right bold">Rp ${totalTransfer.toLocaleString('id-ID')}</td></tr>
+                <tr style="background:#f8fafc;"><td><strong>Total Dana Masuk Diterima Kasir</strong></td><td class="text-right bold"><strong>Rp ${(totalCash + totalTransfer).toLocaleString('id-ID')}</strong></td></tr>
+                <tr><td>Tunggakan Piutang / Kasbon Tamu Belum Lunas</td><td class="text-right bold" style="color:#dc2626;">Rp ${totalDebt.toLocaleString('id-ID')}</td></tr>
+              </table>
+            </div>
           </div>
-          <div class="sig-box">
-            <div>Purworejo, ${dayjs().format('DD MMMM YYYY')}<br/>Mengetahui (Owner / Pengelola):</div>
-            <div class="sig-line">I Ketut Sunetre</div>
+
+          <div class="grid-2">
+            <div>
+              <div class="section-title">C. REKAPITULASI JAM TERBANG & KOMISI LC</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nama LC</th>
+                    <th class="text-center">Jam Kerja</th>
+                    <th class="text-right">Hak Bersih LC</th>
+                    <th class="text-right">Fee Tempat</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${Object.keys(lcSummary).length === 0 ? '<tr><td colspan="4" class="text-center">Tidak ada transaksi LC pada periode ini</td></tr>' : 
+                    Object.entries(lcSummary).map(([name, data]) => `
+                      <tr>
+                        <td class="bold">${name}</td>
+                        <td class="text-center">${data.hours.toFixed(1)} Jam</td>
+                        <td class="text-right bold">Rp ${Math.round(data.lcShare).toLocaleString('id-ID')}</td>
+                        <td class="text-right font-mono" style="color:#15803d;">Rp ${Math.round(data.houseShare).toLocaleString('id-ID')}</td>
+                      </tr>
+                    `).join('')
+                  }
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td class="bold">TOTAL</td>
+                    <td class="text-center bold">${sumLcHours.toFixed(1)} Jam</td>
+                    <td class="text-right bold">Rp ${Math.round(totalLcNetShare).toLocaleString('id-ID')}</td>
+                    <td class="text-right bold" style="color:#166534;">Rp ${Math.round(totalHouseLcShare).toLocaleString('id-ID')}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div>
+              <div class="section-title">D. DETAIL PENJUALAN F&B PER PRODUK</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nama Produk F&B</th>
+                    <th class="text-center">Terjual</th>
+                    <th class="text-right">Total Nominal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${Object.keys(fnbSummary).length === 0 ? '<tr><td colspan="3" class="text-center">Tidak ada transaksi F&B pada periode ini</td></tr>' : 
+                    Object.entries(fnbSummary).map(([name, data]) => `
+                      <tr>
+                        <td class="bold">${name}</td>
+                        <td class="text-center bold">${data.qty} pcs</td>
+                        <td class="text-right bold">Rp ${data.total.toLocaleString('id-ID')}</td>
+                      </tr>
+                    `).join('')
+                  }
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td class="bold">TOTAL</td>
+                    <td class="text-center bold">${sumFnbQty} pcs</td>
+                    <td class="text-right bold">Rp ${grossFnbTotal.toLocaleString('id-ID')}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           </div>
-        </div>
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
-  printWindow.focus();
-  setTimeout(() => { printWindow.print(); }, 500);
+
+          <div class="signature">
+            <div class="sig-box">
+              <div>Dibuat Oleh (Kasir / Admin):</div>
+              <div class="sig-line">Staf Operasional POS</div>
+            </div>
+            <div class="sig-box">
+              <div>Purworejo, ${dayjs().format('DD MMMM YYYY')}<br/>Mengetahui (Owner / Pengelola):</div>
+              <div class="sig-line">I Ketut Sunetre</div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => { printWindow.print(); }, 500);
+  }
 };
 
 export const handlePrintLcPayoutSlip = async (selectedLcForPayout, payoutStartDate, payoutEndDate, rooms, db) => {
@@ -528,5 +544,5 @@ export const handlePrintLcPayoutSlip = async (selectedLcForPayout, payoutStartDa
     </html>
   `;
 
-  printRawBT(payoutHtml);
+  sendToThermalPrinter(payoutHtml);
 };
