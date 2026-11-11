@@ -8,17 +8,19 @@ import {
   calculateTransactionSummary 
 } from './billingHelpers';
 
-// Helper cetak pintar (Android -> RawBT, PC -> Dialog Browser)
+// Helper universal cetak RawBT Thermal 80mm (Akurat untuk Android & PC)
 const sendToThermalPrinter = (htmlContent) => {
   try {
     const base64Html = btoa(unescape(encodeURIComponent(htmlContent)));
     
-    // Deteksi apakah dijalankan di HP/Tablet Android
-    const isAndroid = /Android/i.test(navigator.userAgent) && !/Linux x86_64|Linux i686/i.test(navigator.userAgent);
+    // Deteksi pasti perangkat Android (Mobile / WebView APK)
+    const isAndroid = /Android/i.test(navigator.userAgent) || window.Capacitor;
 
     if (isAndroid) {
-      window.location.href = `rawbt:base64,${base64Html}`;
+      // Skema Intent resmi Android untuk membuka RawBT secara otomatis
+      window.location.href = `intent:${base64Html}#Intent;scheme=rawbt;package=ru.a404m.rawbt;S.content_type=text/html;end;`;
     } else {
+      // Jendela Cetak Biasa untuk Desktop / Laptop (Linux Mint, Windows)
       const printWindow = window.open('', '_blank');
       if (printWindow) {
         printWindow.document.write(htmlContent);
@@ -26,7 +28,7 @@ const sendToThermalPrinter = (htmlContent) => {
         printWindow.focus();
         setTimeout(() => { printWindow.print(); }, 500);
       } else {
-        alert("Pop-up terblokir! Silakan izinkan pop-up di browser Anda.");
+        alert("Pop-up terblokir! Izinkan pop-up di browser Anda.");
       }
     }
   } catch (err) {
@@ -532,7 +534,7 @@ export const handlePrintLcPayoutSlip = async (selectedLcForPayout, payoutStartDa
         <div class="flex"><span>Periode:</span><span>${payoutStartDate} s/d ${payoutEndDate}</span></div>
         <div class="divider-double"></div>
         <div class="bold">RINCIAN JAM TERBANG:</div>
-        ${filteredLogs.map(l => `<div class="flex"><span>${l.date} - ${l.room_name} (${l.hours}h)</span><span class="bold">Rp ${l.cost.toLocaleString('id-ID')}</span></div>`).join('')}
+        ${filteredLogs.map(l => `<div class="flex"><span>${l.date} ${l.room_name} (${l.hours}h)</span><span class="bold">Rp ${l.cost.toLocaleString('id-ID')}</span></div>`).join('')}
         <div class="divider-single"></div>
         <div class="flex bold" style="font-size: 13px;"><span>TOTAL GAJI:</span><span>Rp ${totalLcEarnings.toLocaleString('id-ID')}</span></div>
         <div class="divider-double"></div>
