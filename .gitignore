@@ -1,0 +1,7 @@
+echo "node_modules/" > .gitignore
+echo "dist/" >> .gitignore
+echo ".DS_Store" >> .gitignore
+node_modules/
+dist/
+tokens github
+tokens github
